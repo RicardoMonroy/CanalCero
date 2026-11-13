@@ -13,6 +13,7 @@ import org.meshtastic.proto.MeshPacket
 import org.meshtastic.proto.NodeInfo
 import org.meshtastic.proto.PortNum
 import org.meshtastic.proto.Position
+import org.meshtastic.proto.RouteDiscovery
 import org.meshtastic.proto.Routing
 import org.meshtastic.proto.User
 
@@ -64,6 +65,8 @@ data class MeshState(
     val cfgDispositivo: Config.DeviceConfig? = null,
     val mensajes: List<Mensaje> = emptyList(),
     val error: String? = null,
+    /** Último traceroute por nodo destino. */
+    val trazas: Map<Int, Traza> = emptyMap(),
 ) {
     fun nombre(num: Int): String = nodos[num]?.user?.long_name?.ifBlank { null } ?: idNodo(num)
 
@@ -79,6 +82,36 @@ fun MeshState.reiniciar(
     estado: Estado,
     error: String? = null,
 ): MeshState = MeshState(estado = estado, error = error, miNodo = miNodo, nodos = nodos, mensajes = mensajes)
+
+/**
+ * Resultado de un traceroute: nodos por los que pasó el paquete (incluye origen y destino) y la señal
+ * (SNR en dB) con que se oyó cada salto; null = desconocida.
+ */
+data class Traza(
+    val ida: List<Int>,
+    val snrIda: List<Float?>,
+    val vuelta: List<Int>,
+    val snrVuelta: List<Float?>,
+    val hora: Long,
+)
+
+// El firmware manda el SNR multiplicado por 4 en un int8; -128 significa "no medido".
+private fun snrTraza(v: Int): Float? = if (v == -128) null else v / 4f
+
+/** Arma la traza a partir de la respuesta del destino. Pura. */
+fun traza(
+    yo: Int,
+    destino: Int,
+    r: RouteDiscovery,
+    ahora: Long,
+): Traza =
+    Traza(
+        ida = listOf(yo) + r.route + destino,
+        snrIda = r.snr_towards.map(::snrTraza),
+        vuelta = listOf(destino) + r.route_back + yo,
+        snrVuelta = r.snr_back.map(::snrTraza),
+        hora = ahora,
+    )
 
 /** Borra una conversación solo en este teléfono (Meshtastic no tiene borrado remoto). */
 fun MeshState.sinChat(chat: Chat): MeshState = copy(mensajes = mensajes.filterNot { it.chat(miNodo) == chat })
@@ -126,6 +159,16 @@ private fun MeshState.recibir(
             st = st.copy(mensajes = mensajes + Mensaje(p.id, p.from, p.to, p.channel, d.payload.utf8(), ahora, Entrega.RECIBIDO))
 
         PortNum.NODEINFO_APP -> nodo = nodo.copy(user = User.ADAPTER.decode(d.payload))
+
+        PortNum.TRACEROUTE_APP -> {
+            // Respuesta a nuestro traceroute: viene del destino con request_id = el id que mandamos.
+            val yo = miNodo
+            if (d.request_id != 0 && yo != null && p.to == yo) {
+                runCatching { RouteDiscovery.ADAPTER.decode(d.payload) }.getOrNull()?.let { r ->
+                    st = st.copy(trazas = trazas + (p.from to traza(yo, p.from, r, ahora)))
+                }
+            }
+        }
 
         PortNum.POSITION_APP -> {
             Position.ADAPTER.decode(d.payload).takeIf { it.latitude_i != null }?.let { nodo = nodo.copy(position = it) }

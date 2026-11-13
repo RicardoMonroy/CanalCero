@@ -6,6 +6,18 @@ import kotlin.math.floor
 import kotlin.math.ln
 import kotlin.math.tan
 
+/** Mínimo entre búsquedas de nodos: cada una hace contestar a todos los nodos cercanos por radio. */
+const val ESPERA_BUSQUEDA_SEG = 5 * 60L
+
+/** Segundos que faltan para poder buscar otra vez (0 = ya se puede). Tiempos en ms. */
+fun esperaRestante(
+    ultima: Long,
+    ahora: Long,
+): Long = if (ultima == 0L) 0 else (ESPERA_BUSQUEDA_SEG - (ahora - ultima) / 1000).coerceAtLeast(0)
+
+/** "Cerca": oídos en la última hora. */
+const val CERCA_SEG = 3600L
+
 /** Nodos oídos en este lapso aparecen en la pestaña Ruta. */
 const val RECIENTE_SEG = 2 * 3600L
 

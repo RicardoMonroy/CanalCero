@@ -146,4 +146,29 @@ class MeshStateTest {
         assertEquals(listOf(4, 3, 2, 1, 0), listOf(8f, 0f, -7f, -15f, -18f).map(::nivelSenal))
         assertEquals(listOf(4, 3, 2, 1, 0), listOf(-50, -70, -80, -90, -95).map(::nivelRssi))
     }
+
+    @Test
+    fun tracerouteSeGuardaConSnrEscalado() {
+        val rep = 77
+        // Respuesta del destino: pasó por el repetidor 77; SNR x4, -128 = no medido.
+        val r = org.meshtastic.proto.RouteDiscovery(route = listOf(rep), snr_towards = listOf(26, -128), route_back = listOf(rep), snr_back = listOf(-20, 8))
+        val resp = paquete(otro, yo, Data(portnum = PortNum.TRACEROUTE_APP, payload = r.encodeByteString(), request_id = 999))
+        val st = MeshState(miNodo = yo).aplicar(resp, 5_000)
+        val t = st.trazas[otro]!!
+        assertEquals(listOf(yo, rep, otro), t.ida)
+        assertEquals(listOf(6.5f, null), t.snrIda)
+        assertEquals(listOf(otro, rep, yo), t.vuelta)
+        assertEquals(listOf(-5f, 2f), t.snrVuelta)
+        // Sin request_id es una petición de otro nodo, no nuestra respuesta.
+        val peticion = paquete(otro, yo, Data(portnum = PortNum.TRACEROUTE_APP, payload = r.encodeByteString()))
+        assertEquals(emptyMap<Int, Traza>(), MeshState(miNodo = yo).aplicar(peticion, 0).trazas)
+    }
+
+    @Test
+    fun esperaEntreBusquedas() {
+        assertEquals(0L, esperaRestante(0, 1_000_000))
+        assertEquals(ESPERA_BUSQUEDA_SEG, esperaRestante(1_000_000, 1_000_000))
+        assertEquals(240L, esperaRestante(1_000_000, 1_060_000))
+        assertEquals(0L, esperaRestante(1_000_000, 1_000_000 + ESPERA_BUSQUEDA_SEG * 1000 + 1))
+    }
 }

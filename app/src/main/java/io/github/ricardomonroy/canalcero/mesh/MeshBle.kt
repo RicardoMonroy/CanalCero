@@ -37,6 +37,7 @@ import org.meshtastic.proto.MeshPacket
 import org.meshtastic.proto.NodeInfo
 import org.meshtastic.proto.PortNum
 import org.meshtastic.proto.Position
+import org.meshtastic.proto.RouteDiscovery
 import org.meshtastic.proto.ToRadio
 import org.meshtastic.proto.User
 import java.util.UUID
@@ -262,6 +263,47 @@ class MeshBle(
                 _state.update { st2 -> st2.copy(mensajes = st2.mensajes.map { x -> if (x.id == id) x.copy(entrega = Entrega.FALLO) else x }) }
             }
         }
+    }
+
+    // --- Explorar la red ---
+
+    private var ultimaBusqueda = 0L
+
+    /**
+     * Anuncia nuestro nodo por el canal Principal pidiendo respuesta: los nodos que nos oyen contestan con
+     * su NodeInfo y aparecen en Nodos sin esperar su anuncio periódico (~3 h).
+     * Devuelve los segundos que faltan si se pidió hace menos de [ESPERA_BUSQUEDA_SEG] (cuida el canal).
+     */
+    fun buscarNodos(): Long {
+        val g = gatt ?: return 0
+        val st = _state.value
+        val yo = st.miNodo ?: return 0
+        val falta = esperaRestante(ultimaBusqueda, System.currentTimeMillis())
+        if (falta > 0) return falta
+        val usuario = st.nodos[yo]?.user ?: return 0
+        ultimaBusqueda = System.currentTimeMillis()
+        val paquete =
+            MeshPacket(
+                to = BROADCAST,
+                channel = 0,
+                id = Random.nextInt(1, Int.MAX_VALUE),
+                decoded = Data(portnum = PortNum.NODEINFO_APP, payload = usuario.encodeByteString(), want_response = true),
+            )
+        scope.launch { runCatching { enviar(g, ToRadio(packet = paquete)) } }
+        return 0
+    }
+
+    /** Pide la ruta hasta [nodo]; la respuesta llega a MeshState.trazas. */
+    fun trazarRuta(nodo: Int) {
+        val g = gatt ?: return
+        val paquete =
+            MeshPacket(
+                to = nodo,
+                id = Random.nextInt(1, Int.MAX_VALUE),
+                want_ack = true,
+                decoded = Data(portnum = PortNum.TRACEROUTE_APP, payload = RouteDiscovery().encodeByteString(), want_response = true),
+            )
+        scope.launch { runCatching { enviar(g, ToRadio(packet = paquete)) } }
     }
 
     fun borrarChat(chat: Chat) = _state.update { it.sinChat(chat) }

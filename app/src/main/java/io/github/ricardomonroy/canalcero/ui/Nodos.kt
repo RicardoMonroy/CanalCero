@@ -10,12 +10,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -25,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.ricardomonroy.canalcero.Malla
 import io.github.ricardomonroy.canalcero.R
+import io.github.ricardomonroy.canalcero.mesh.CERCA_SEG
 import io.github.ricardomonroy.canalcero.mesh.Chat
 import io.github.ricardomonroy.canalcero.mesh.MeshState
 import io.github.ricardomonroy.canalcero.mesh.distancia
@@ -35,6 +40,7 @@ import io.github.ricardomonroy.canalcero.mesh.nivelSenal
 import io.github.ricardomonroy.canalcero.mesh.puntoCardinal
 import io.github.ricardomonroy.canalcero.mesh.rumbo
 import io.github.ricardomonroy.canalcero.mesh.textoDistancia
+import kotlinx.coroutines.delay
 import org.meshtastic.proto.NodeInfo
 
 @Composable
@@ -45,16 +51,57 @@ fun Nodos(
     verEnMapa: (Int) -> Unit,
 ) {
     var ficha by remember { mutableStateOf<Int?>(null) }
+    var soloCerca by rememberSaveable { mutableStateOf(false) }
+    var aviso by remember { mutableStateOf<String?>(null) }
     ficha?.let { n -> FichaNodo(st, malla, n, { ficha = null }, abrirChat, verEnMapa) }
     val ahora = System.currentTimeMillis() / 1000
-    // Tu nodo primero; luego por quién se oyó más recientemente.
-    val nodos = st.nodos.values.sortedWith(compareByDescending<NodeInfo> { it.num == st.miNodo }.thenByDescending { it.last_heard })
-    if (nodos.isEmpty()) {
-        Vacio(R.drawable.ic_cell_tower, "Sin nodos todavía", "Aparecerán aquí los nodos que tu nodo escuche por radio.")
-        return
-    }
+
+    val yo = st.miNodo?.let { st.nodos[it] }
+    val otros = st.nodos.values.filter { it.num != st.miNodo && (!soloCerca || (it.last_heard > 0 && ahora - it.last_heard <= CERCA_SEG)) }
+    // Directos = nos oyen sin repetidor (hops_away 0). Sin dato de saltos, se cuentan como "por repetidor".
+    val directos = otros.filter { it.hops_away == 0 }.sortedByDescending { it.last_heard }
+    val lejanos = otros.filter { it.hops_away != 0 }.sortedWith(compareBy<NodeInfo> { it.hops_away ?: 99 }.thenByDescending { it.last_heard })
+
     LazyColumn {
-        items(nodos, key = { it.num }) { n -> FilaNodo(st, n, ahora) { ficha = n.num } }
+        item {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = {
+                    val falta = malla.ble.buscarNodos()
+                    aviso =
+                        if (falta > 0) {
+                            "Ya buscaste hace poco. Espera ${(falta + 59) / 60} min para no saturar el canal."
+                        } else {
+                            "Preguntando por el canal Principal… los nodos que te oigan aparecerán en unos segundos."
+                        }
+                }, Modifier.fillMaxWidth()) {
+                    Icono(R.drawable.ic_bluetooth_searching, null)
+                    Text("  Buscar nodos cercanos")
+                }
+                aviso?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !soloCerca, onClick = { soloCerca = false }, label = { Text("Todos (${st.nodos.keys.count { it != st.miNodo }})") })
+                    FilterChip(selected = soloCerca, onClick = { soloCerca = true }, label = { Text("Oídos en la última hora") })
+                }
+            }
+        }
+        yo?.let { n -> item(key = n.num) { FilaNodo(st, n, ahora) { ficha = n.num } } }
+        if (otros.isEmpty()) {
+            item {
+                Vacio(
+                    R.drawable.ic_cell_tower,
+                    if (soloCerca) "Nadie en la última hora" else "Sin otros nodos todavía",
+                    "Toca Buscar nodos cercanos o espera a que se anuncien (lo hacen cada ~3 h).",
+                )
+            }
+        }
+        if (directos.isNotEmpty()) {
+            item { Seccion("Directos · te oyen sin repetidor") }
+            items(directos, key = { it.num }) { n -> FilaNodo(st, n, ahora) { ficha = n.num } }
+        }
+        if (lejanos.isNotEmpty()) {
+            item { Seccion("Por repetidor") }
+            items(lejanos, key = { it.num }) { n -> FilaNodo(st, n, ahora) { ficha = n.num } }
+        }
     }
 }
 
@@ -131,6 +178,7 @@ private fun FichaNodo(
             if (!mio && n.snr != 0f) Dato("Señal", "%.1f dB".format(n.snr))
             n.user?.hw_model?.let { Dato("Equipo", it.name.replace('_', ' ')) }
             if (!mio) {
+                Traceroute(st, malla, num)
                 FilledTonalButton(onClick = {
                     cerrar()
                     abrirChat(Chat.Directo(num))
@@ -153,5 +201,66 @@ private fun FichaNodo(
                 }
             }
         }
+    }
+}
+
+/** "Probar ruta": por qué nodos pasa un mensaje hasta [num] y con qué señal se oye cada salto. */
+@Composable
+private fun Traceroute(
+    st: MeshState,
+    malla: Malla,
+    num: Int,
+) {
+    var enviada by remember { mutableStateOf<Long?>(null) }
+    val t = st.trazas[num]
+    // Respuesta llega después de enviar: solo cuenta si es más nueva que la petición.
+    val nueva = t != null && (enviada == null || t.hora >= enviada!!)
+    var ahora by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(enviada) {
+        while (enviada != null && System.currentTimeMillis() - enviada!! < 70_000) {
+            delay(1_000)
+            ahora = System.currentTimeMillis()
+        }
+    }
+    Seccion("Ruta")
+    when {
+        t != null && nueva -> {
+            SaltosRuta(st, "Ida", t.ida, t.snrIda)
+            if (t.vuelta.size > 1 && t.snrVuelta.isNotEmpty()) SaltosRuta(st, "Vuelta", t.vuelta, t.snrVuelta)
+            Text("Probada ${horaCorta(t.hora)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        enviada != null && ahora - enviada!! < 60_000 -> Text("Esperando respuesta… (hasta 1 min)", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        enviada != null -> Text("Sin respuesta: está fuera de alcance o apagado.", color = MaterialTheme.colorScheme.error)
+    }
+    OutlinedButton(onClick = {
+        enviada = System.currentTimeMillis()
+        malla.ble.trazarRuta(num)
+    }, Modifier.fillMaxWidth()) {
+        Icono(R.drawable.ic_route, null)
+        Text("  Probar ruta")
+    }
+}
+
+@Composable
+private fun SaltosRuta(
+    st: MeshState,
+    titulo: String,
+    nodos: List<Int>,
+    snr: List<Float?>,
+) = Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Text(
+        titulo + if (nodos.size <= 2) " · directo" else " · ${nodos.size - 2} repetidor" + if (nodos.size > 3) "es" else "",
+        style = MaterialTheme.typography.labelLarge,
+    )
+    nodos.forEachIndexed { i, n ->
+        Text(
+            buildString {
+                append(if (i == 0) "● " else "↓ ")
+                append(st.nombre(n))
+                // snr[i-1] = cómo oyó el nodo i al anterior.
+                if (i > 0) append(snr.getOrNull(i - 1)?.let { "   (señal %.1f dB)".format(it) } ?: "   (señal ?)")
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
