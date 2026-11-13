@@ -32,7 +32,8 @@ App Android para comunicarse por LoRa usando nodos Meshtastic, pensada para cuan
    - Renombrar el nodo (`AdminMessage.set_owner`: nombre largo + corto de 4 caracteres; p. ej. hoy `rm79_d534` y `P15…`).
    - Precisión de posición por canal: público `LongFast` = 0 (no compartir), privado = 32 (exacta). El firmware manda la posición solo por el primer canal con precisión ≠ 0.
    - Intervalo de transmisión de posición (más corto para modo moto).
-   - Probar si el firmware recorta una posición que el teléfono envía por mensaje directo (botón "Enviar mi ubicación a…").
+   - Ubicación exacta por mensaje directo. Probado (2026-11-13, firmware 2.7.15): el firmware **no** recorta la posición que manda el teléfono.
+   - ✅ Fase 2 completa y probada entre S23 y Pixel 10.
 3. **Modo moto:** mapas offline, distancia/rumbo, mensajes rápidos, TTS, prueba de alcance (registro RSSI/SNR + distancia).
 4. **Modo emergencia:** "Estoy bien", pase de lista, SOS, historial persistente.
 5. (Opcional) Puente MQTT.

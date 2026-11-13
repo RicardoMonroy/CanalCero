@@ -95,4 +95,20 @@ class MeshStateTest {
         assertEquals(false, qro.esAproximada())
         assertEquals(true, Position(latitude_i = 1, longitude_i = 1).esAproximada()) // precisión desconocida
     }
+
+    @Test
+    fun ubicacionDirectaCreaMensajeYConfigSeGuarda() {
+        val pos = Position(latitude_i = 205_888_000, longitude_i = -1_003_899_000, precision_bits = 32)
+        var st = MeshState(miNodo = yo)
+        st = st.aplicar(paquete(otro, yo, Data(portnum = PortNum.POSITION_APP, payload = pos.encodeByteString())), 0)
+        st = st.aplicar(paquete(otro, BROADCAST, Data(portnum = PortNum.POSITION_APP, payload = pos.encodeByteString())), 0)
+        assertEquals(listOf(TEXTO_UBICACION_RECIBIDA), st.mensajes.map { it.texto }) // la de broadcast no crea mensaje
+        assertEquals(false, st.nodos[otro]?.position?.esAproximada())
+
+        val pc = org.meshtastic.proto.Config.PositionConfig(position_broadcast_secs = 60)
+        st = st.aplicar(viaBle(FromRadio(config = org.meshtastic.proto.Config(position = pc))), 0)
+        st = st.aplicar(viaBle(FromRadio(config = org.meshtastic.proto.Config(lora = org.meshtastic.proto.Config.LoRaConfig(hop_limit = 3)))), 0)
+        assertEquals(60, st.cfgPosicion?.position_broadcast_secs) // otra sección no la borra
+        assertEquals(3, st.lora?.hop_limit)
+    }
 }

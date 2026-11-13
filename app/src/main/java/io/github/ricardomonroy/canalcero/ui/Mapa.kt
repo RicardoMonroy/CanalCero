@@ -89,6 +89,8 @@ fun Mapa(
         factory = {
             vista.apply {
                 getMapAsync { m ->
+                    // Nodos a pocos metros encuadran a zoom ~22: sin calles en pantalla, el mapa se ve negro.
+                    m.setMaxZoomPreference(17.0)
                     m.cameraPosition =
                         org.maplibre.android.camera.CameraPosition
                             .Builder()

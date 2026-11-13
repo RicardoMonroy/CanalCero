@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -17,6 +18,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -40,12 +43,18 @@ import io.github.ricardomonroy.canalcero.mesh.MAX_BYTES_NOMBRE_CORTO
 import io.github.ricardomonroy.canalcero.mesh.MAX_BYTES_NOMBRE_LARGO
 import io.github.ricardomonroy.canalcero.mesh.MeshBle
 import io.github.ricardomonroy.canalcero.mesh.MeshState
+import io.github.ricardomonroy.canalcero.mesh.PerfilPosicion
+import io.github.ricardomonroy.canalcero.mesh.ROLES
+import io.github.ricardomonroy.canalcero.mesh.Rol
+import io.github.ricardomonroy.canalcero.mesh.paraMexico
+import io.github.ricardomonroy.canalcero.mesh.sinRegion
 import io.github.ricardomonroy.canalcero.mesh.canalPrivado
 import io.github.ricardomonroy.canalcero.mesh.leerUrlCanal
 import io.github.ricardomonroy.canalcero.mesh.nombreCanal
 import io.github.ricardomonroy.canalcero.mesh.urlCanal
 import kotlinx.coroutines.launch
 import org.meshtastic.proto.ChannelSettings
+import org.meshtastic.proto.Config
 
 @Composable
 fun Ajustes(
@@ -57,6 +66,7 @@ fun Ajustes(
     var ocupado by remember { mutableStateOf(false) }
     var qr by remember { mutableStateOf<String?>(null) }
     var porUnirse by remember { mutableStateOf<ChannelSettings?>(null) }
+    var rolPendiente by remember { mutableStateOf<Rol?>(null) }
 
     // Las operaciones de admin pueden reiniciar el nodo: el error se muestra, no se oculta.
     fun ejecutar(
@@ -74,6 +84,17 @@ fun Ajustes(
     Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         aviso?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
+        // Un nodo recién comprado viene sin región y no transmite nada.
+        if (st.lora.sinRegion()) {
+            Text("Tu nodo no tiene región: no puede transmitir.", color = MaterialTheme.colorScheme.error)
+            Button(
+                onClick = { ejecutar("Región configurada. El nodo se reinicia: vuelve a conectarte.") { ble.configurar(Config(lora = st.lora.paraMexico())) } },
+                enabled = !ocupado,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Configurar para México (915 MHz)") }
+            HorizontalDivider()
+        }
+
         // --- Nombre ---
         val yo = st.miNodo?.let { st.nodos[it]?.user }
         var largo by rememberSaveable(yo?.long_name) { mutableStateOf(yo?.long_name.orEmpty()) }
@@ -88,6 +109,29 @@ fun Ajustes(
         ) { Text("Guardar nombre") }
 
         HorizontalDivider()
+
+        // --- Posición ---
+        st.cfgPosicion?.let { cfg ->
+            val actual = PerfilPosicion.de(cfg)
+            Text("Cada cuánto transmite tu posición", style = MaterialTheme.typography.titleMedium)
+            if (actual == null) Text("Configuración personalizada (hecha en otra app).", style = MaterialTheme.typography.bodySmall)
+            PerfilPosicion.entries.forEach { p ->
+                Opcion(p.nombre, p.detalle, elegida = p == actual, habilitada = !ocupado) {
+                    ejecutar("Posición: perfil ${p.nombre}") { ble.configurar(Config(position = p.aplicar(cfg))) }
+                }
+            }
+            HorizontalDivider()
+        }
+
+        // --- Rol ---
+        st.cfgDispositivo?.let { cfg ->
+            Text("Rol del nodo", style = MaterialTheme.typography.titleMedium)
+            ROLES.forEach { r ->
+                Opcion(r.nombre, r.detalle, elegida = r.rol == cfg.role, habilitada = !ocupado) { rolPendiente = r }
+            }
+            if (ROLES.none { it.rol == cfg.role }) Text("Rol actual: ${cfg.role}", style = MaterialTheme.typography.bodySmall)
+            HorizontalDivider()
+        }
 
         // --- Canales ---
         Text("Canales", style = MaterialTheme.typography.titleMedium)
@@ -134,6 +178,21 @@ fun Ajustes(
     }
 
     qr?.let { url -> DialogoQr(url) { qr = null } }
+    rolPendiente?.let { r ->
+        AlertDialog(
+            onDismissRequest = { rolPendiente = null },
+            title = { Text("¿Cambiar a \"${r.nombre}\"?") },
+            text = { Text(listOfNotNull(r.detalle, r.aviso, "El nodo se reinicia y tendrás que volver a conectarte.").joinToString("\n\n")) },
+            confirmButton = {
+                Button(onClick = {
+                    rolPendiente = null
+                    val cfg = st.cfgDispositivo ?: return@Button
+                    ejecutar("Rol cambiado a ${r.nombre}. El nodo se reinicia: vuelve a conectarte.") { ble.configurar(Config(device = cfg.copy(role = r.rol))) }
+                }) { Text("Cambiar") }
+            },
+            dismissButton = { TextButton(onClick = { rolPendiente = null }) { Text("Cancelar") } },
+        )
+    }
     porUnirse?.let { s ->
         AlertDialog(
             onDismissRequest = { porUnirse = null },
@@ -208,6 +267,23 @@ private fun DialogoQr(
             }) { Text("Enviar enlace") }
         },
     )
+}
+
+@Composable
+private fun Opcion(
+    nombre: String,
+    detalle: String,
+    elegida: Boolean,
+    habilitada: Boolean,
+    elegir: () -> Unit,
+) = Row(
+    Modifier.fillMaxWidth().selectable(selected = elegida, enabled = habilitada, role = Role.RadioButton, onClick = elegir).padding(vertical = 4.dp),
+) {
+    RadioButton(selected = elegida, onClick = null, enabled = habilitada)
+    Column(Modifier.padding(start = 8.dp)) {
+        Text(nombre)
+        Text(detalle, style = MaterialTheme.typography.bodySmall)
+    }
 }
 
 @Composable

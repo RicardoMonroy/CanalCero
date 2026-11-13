@@ -39,6 +39,7 @@ fun PantallaChat(
     chat: Chat,
     enviar: (String) -> Unit,
     volver: () -> Unit,
+    enviarUbicacion: () -> Unit,
 ) {
     val mensajes = st.mensajes.filter { it.chat(st.miNodo) == chat }
     val lista = rememberLazyListState()
@@ -86,6 +87,12 @@ fun PantallaChat(
                         color = if (m.entrega == Entrega.FALLO) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                     )
                 }
+            }
+        }
+        if (chat is Chat.Directo) {
+            val tengo = st.miNodo?.let { st.nodos[it]?.position } != null
+            TextButton(onClick = enviarUbicacion, enabled = tengo) {
+                Text(if (tengo) "📍 Enviar mi ubicación exacta" else "📍 Activa \"Compartir mi ubicación\" en Mapa para enviarla")
             }
         }
         Entrada(enviar)

@@ -29,6 +29,7 @@ import okio.ByteString.Companion.encodeUtf8
 import org.meshtastic.proto.AdminMessage
 import org.meshtastic.proto.Channel
 import org.meshtastic.proto.ChannelSettings
+import org.meshtastic.proto.Config
 import org.meshtastic.proto.Data
 import org.meshtastic.proto.FromRadio
 import org.meshtastic.proto.MeshPacket
@@ -222,6 +223,38 @@ class MeshBle(
         st.canales[0]?.let { cambios += AdminMessage(set_channel = primarioSinPosicion(it)) }
         administrar(cambios)
         _state.update { x -> cambios.mapNotNull { it.set_channel }.fold(x) { acc, c -> acc.conCanal(c) } }
+    }
+
+    /** Reemplaza una sección de configuración (position, device o lora). device y lora reinician el nodo. */
+    suspend fun configurar(c: Config) {
+        administrar(listOf(AdminMessage(set_config = c)))
+        _state.update { it.aplicar(FromRadio(config = c), System.currentTimeMillis()) }
+    }
+
+    /**
+     * Manda la última ubicación del teléfono, exacta, solo a [nodo] (cifrada con su llave pública si el firmware la tiene).
+     * Requiere "Compartir mi ubicación" activo para tener una posición.
+     */
+    fun enviarPosicionA(nodo: Int) {
+        val g = gatt ?: return
+        val st = _state.value
+        val p = st.miNodo?.let { st.nodos[it]?.position } ?: return
+        val id = Random.nextInt(1, Int.MAX_VALUE)
+        val exacta = p.copy(precision_bits = PRECISION_EXACTA, time = (System.currentTimeMillis() / 1000).toInt())
+        val m = Mensaje(id, st.miNodo, nodo, 0, TEXTO_UBICACION_ENVIADA, System.currentTimeMillis(), Entrega.ENVIANDO)
+        _state.update { it.copy(mensajes = it.mensajes + m) }
+        val paquete =
+            MeshPacket(
+                to = nodo,
+                id = id,
+                want_ack = true,
+                decoded = Data(portnum = PortNum.POSITION_APP, payload = exacta.encodeByteString()),
+            )
+        scope.launch {
+            runCatching { enviar(g, ToRadio(packet = paquete)) }.onFailure {
+                _state.update { st2 -> st2.copy(mensajes = st2.mensajes.map { x -> if (x.id == id) x.copy(entrega = Entrega.FALLO) else x }) }
+            }
+        }
     }
 
     fun desconectar() {

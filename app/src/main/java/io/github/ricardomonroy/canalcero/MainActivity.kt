@@ -142,7 +142,13 @@ private fun Conectado(
 
     abierto?.let { chat ->
         BackHandler { abierto = null }
-        PantallaChat(st, chat, enviar = { vm.ble.enviarTexto(it, chat) }, volver = { abierto = null })
+        PantallaChat(
+            st,
+            chat,
+            enviar = { vm.ble.enviarTexto(it, chat) },
+            volver = { abierto = null },
+            enviarUbicacion = { (chat as? Chat.Directo)?.let { vm.ble.enviarPosicionA(it.nodo) } },
+        )
         return
     }
 

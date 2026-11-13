@@ -21,6 +21,9 @@ enum class Estado { DESCONECTADO, CONECTANDO, EMPAREJANDO, DESCARGANDO, LISTO }
 /** Destino "todos" de Meshtastic (0xFFFFFFFF). */
 const val BROADCAST: Int = -1
 
+const val TEXTO_UBICACION_RECIBIDA = "📍 Te compartió su ubicación (míralo en el mapa)"
+const val TEXTO_UBICACION_ENVIADA = "📍 Le enviaste tu ubicación exacta"
+
 /** Payload máximo de texto que acepta la app oficial. */
 const val MAX_BYTES_TEXTO = 200
 
@@ -57,6 +60,8 @@ data class MeshState(
     /** Canales activos por índice (0 = primario). Se guardan completos: para editarlos hay que reenviarlos enteros. */
     val canales: Map<Int, Channel> = emptyMap(),
     val lora: Config.LoRaConfig? = null,
+    val cfgPosicion: Config.PositionConfig? = null,
+    val cfgDispositivo: Config.DeviceConfig? = null,
     // shortcut: solo en memoria, se pierde al desconectar. Persistir (Room) en el modo emergencia.
     val mensajes: List<Mensaje> = emptyList(),
     val error: String? = null,
@@ -80,7 +85,12 @@ fun MeshState.aplicar(
         fr.node_info != null -> copy(nodos = nodos + (fr.node_info.num to fr.node_info))
         fr.metadata != null -> copy(firmware = fr.metadata.firmware_version)
         fr.channel != null -> conCanal(fr.channel)
-        fr.config?.lora != null -> copy(lora = fr.config.lora)
+        fr.config != null ->
+            copy(
+                lora = fr.config.lora ?: lora,
+                cfgPosicion = fr.config.position ?: cfgPosicion,
+                cfgDispositivo = fr.config.device ?: cfgDispositivo,
+            )
         fr.packet != null -> recibir(fr.packet, ahora)
         fr.config_complete_id != null -> copy(estado = Estado.LISTO)
         else -> this
@@ -106,7 +116,13 @@ private fun MeshState.recibir(
 
         PortNum.NODEINFO_APP -> nodo = nodo.copy(user = User.ADAPTER.decode(d.payload))
 
-        PortNum.POSITION_APP -> Position.ADAPTER.decode(d.payload).takeIf { it.latitude_i != null }?.let { nodo = nodo.copy(position = it) }
+        PortNum.POSITION_APP -> {
+            Position.ADAPTER.decode(d.payload).takeIf { it.latitude_i != null }?.let { nodo = nodo.copy(position = it) }
+            // Posición mandada solo a nosotros (botón "Enviar mi ubicación" de un chat directo).
+            if (p.to == miNodo && p.from != miNodo) {
+                st = st.copy(mensajes = mensajes + Mensaje(p.id, p.from, p.to, p.channel, TEXTO_UBICACION_RECIBIDA, ahora, Entrega.RECIBIDO))
+            }
+        }
 
         PortNum.ROUTING_APP -> {
             // Respuesta de enrutamiento a un paquete nuestro: request_id es el id que mandamos.
