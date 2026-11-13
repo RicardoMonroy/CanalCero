@@ -28,7 +28,11 @@ App Android para comunicarse por LoRa usando nodos Meshtastic, pensada para cuan
 ## Hoja de ruta
 
 1. **MVP:** conectar por BLE, chat por canal y directo, lista de nodos, mapa con posiciones.
-2. **Modo admin:** aprovisionar nodos (región, preset, rol, nombre, canales) y compartir canales por QR.
+2. **Modo admin:** aprovisionar nodos (región, preset, rol, canales) y compartir canales por QR.
+   - Renombrar el nodo (`AdminMessage.set_owner`: nombre largo + corto de 4 caracteres; p. ej. hoy `rm79_d534` y `P15…`).
+   - Precisión de posición por canal: público `LongFast` = 0 (no compartir), privado = 32 (exacta). El firmware manda la posición solo por el primer canal con precisión ≠ 0.
+   - Intervalo de transmisión de posición (más corto para modo moto).
+   - Probar si el firmware recorta una posición que el teléfono envía por mensaje directo (botón "Enviar mi ubicación a…").
 3. **Modo moto:** mapas offline, distancia/rumbo, mensajes rápidos, TTS, prueba de alcance (registro RSSI/SNR + distancia).
 4. **Modo emergencia:** "Estoy bien", pase de lista, SOS, historial persistente.
 5. (Opcional) Puente MQTT.
@@ -42,6 +46,8 @@ App Android para comunicarse por LoRa usando nodos Meshtastic, pensada para cuan
 | Nodo moto | Heltec Wireless Tracker o LilyGO T-Beam (con GPS) |
 
 Teléfonos de prueba: Samsung S23, Pixel 10.
+
+Guía de compra detallada (por finalidad y rango de precio, antenas, energía): [EQUIPOS.md](EQUIPOS.md).
 
 ## Identidad gráfica
 
