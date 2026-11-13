@@ -51,14 +51,18 @@ Es compatible con la red pública de Meshtastic y con su app oficial, pero simpl
 1. **Enciende tu nodo** y déjalo cerca del teléfono.
 2. Abre CanalCero, toca **Buscar nodos** y elige el tuyo.
 3. **PIN de emparejamiento**: si tu nodo tiene pantalla, el PIN aparece ahí. Si no tiene pantalla (como el T1000-E), normalmente es `123456`.
-4. Si el nodo es nuevo, ve a **Ajustes → Mi nodo**:
-   - **Configurar para México (915 MHz)**: sin región el nodo no transmite.
-   - Ponle tu **nombre** y un **nombre corto** de hasta 4 letras (el que se ve en el mapa).
-5. Para tu familia o grupo, en **Ajustes → Canales** crea un **canal privado** y compártelo con el QR. Los demás lo escanean desde la misma pantalla.
+4. Si el nodo es nuevo, se abre el **asistente de configuración**, que te lleva paso a paso:
+   - **Región México (915 MHz)**: sin región el nodo no transmite.
+   - Tu **nombre** y un **nombre corto** de hasta 4 letras (el que se ve en el mapa).
+   - Ocultar tu ubicación del canal público.
+   - Crear un **canal privado** para tu familia o grupo y compartirlo con un QR, o unirte escaneando el de alguien más.
+   - Quitar el ahorro de batería.
+
+   Puedes volver a abrirlo en **Ajustes → Asistente de configuración**.
 
 ### Que funcione con la pantalla apagada (importante para emergencias)
 
-Algunas marcas cierran las apps en segundo plano para ahorrar batería. Si dejas de recibir mensajes con el teléfono bloqueado, quita la restricción:
+Algunas marcas cierran las apps en segundo plano para ahorrar batería. CanalCero te pide quitar esa restricción al conectarte (también desde **Ajustes**, sección App). Si aun así dejas de recibir mensajes con el teléfono bloqueado, revisa a mano:
 
 - **Samsung**: Ajustes → Aplicaciones → CanalCero → Batería → **Sin restricciones**.
 - **Xiaomi / Redmi / POCO**: Ajustes → Apps → CanalCero → Ahorro de batería → **Sin restricciones**, y activa **Inicio automático**.

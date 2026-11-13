@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Pedir quitar el ahorro de batería: la app debe recibir SOS con la pantalla apagada. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Mosaicos del mapa. -->
     <uses-permission android:name="android.permission.INTERNET" />
 

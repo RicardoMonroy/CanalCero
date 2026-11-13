@@ -146,6 +146,10 @@ private fun Inicio(
     }
     Seccion("Mi nodo")
     Fila(R.drawable.ic_person, "Nombre, rol y región", listOfNotNull(yo?.long_name, ROLES.firstOrNull { it.rol == st.cfgDispositivo?.role }?.nombre).joinToString(" · ")) { ir(SubAjuste.MI_NODO) }
+    Fila(R.drawable.ic_settings, "Asistente de configuración", "Región, nombre, privacidad y canal paso a paso") {
+        ir(null)
+        malla.asistente = true
+    }
     Seccion("Privacidad")
     if (malla.compartirUbicacion && st.ubicacionPublica()) {
         Fila(R.drawable.ic_error, "Tu ubicación sale en el canal público", "Toca para revisarlo", alerta = true) { ir(SubAjuste.UBICACION) }
@@ -153,6 +157,12 @@ private fun Inicio(
     Fila(R.drawable.ic_location_on, "Ubicación", (if (malla.compartirUbicacion) "Compartiendo" else "No se comparte") + " · perfil $perfil") { ir(SubAjuste.UBICACION) }
     Fila(R.drawable.ic_lock, "Canales", if (privados == 0) "Solo el público" else "$privados privado" + if (privados > 1) "s" else "") { ir(SubAjuste.CANALES) }
     Seccion("App")
+    val (bateriaLibre, pedirBateria) = recordarBateria()
+    if (bateriaLibre) {
+        Fila(R.drawable.ic_done, "Batería sin restricciones", "Recibe mensajes con la pantalla apagada") { pedirBateria() }
+    } else {
+        Fila(R.drawable.ic_error, "Ahorro de batería activo", "Puede dejar de recibir con la pantalla apagada. Toca para quitarlo", alerta = true) { pedirBateria() }
+    }
     Fila(R.drawable.ic_download, "Mapas sin internet", "Zonas descargadas para usar sin red") { ir(SubAjuste.MAPAS) }
     Fila(R.drawable.ic_palette, "Apariencia", malla.tema.nombre) { ir(SubAjuste.APARIENCIA) }
     Fila(R.drawable.ic_info, "Acerca de", "Versión ${version(LocalContext.current)}, licencia y créditos") { ir(SubAjuste.ACERCA) }
@@ -430,7 +440,7 @@ fun alternadorUbicacion(malla: Malla): (Boolean) -> Unit {
 }
 
 @Composable
-private fun Unirse(
+internal fun Unirse(
     alInterpretar: (ChannelSettings) -> Unit,
     alError: (String) -> Unit,
 ) {
@@ -460,7 +470,7 @@ private fun Unirse(
 }
 
 @Composable
-private fun DialogoQr(
+internal fun DialogoQr(
     url: String,
     cerrar: () -> Unit,
 ) {
@@ -507,7 +517,7 @@ private fun Opcion(
 }
 
 @Composable
-private fun CampoBytes(
+internal fun CampoBytes(
     etiqueta: String,
     valor: String,
     max: Int,

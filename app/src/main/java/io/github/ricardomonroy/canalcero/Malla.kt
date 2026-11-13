@@ -108,6 +108,29 @@ class Malla(
         prefs.edit { putBoolean("estilo_claro", estiloClaro) }
     }
 
+    /** El usuario dijo "Ahora no" al aviso de batería; sigue disponible en Ajustes. */
+    var avisoBateriaOculto by mutableStateOf(prefs.getBoolean("aviso_bateria_oculto", false))
+        private set
+
+    fun ocultarAvisoBateria() {
+        avisoBateriaOculto = true
+        prefs.edit { putBoolean("aviso_bateria_oculto", true) }
+    }
+
+    /** Asistente de nodo nuevo abierto. Se abre solo una vez por nodo; desde Ajustes, cuando se quiera. */
+    var asistente by mutableStateOf(false)
+
+    /** IDs (!xxxxxxxx) de los nodos que ya pasaron por el asistente (terminado u omitido). */
+    var asistentesHechos by mutableStateOf(prefs.getStringSet("asistentes_hechos", emptySet())!!.toSet())
+        private set
+
+    fun terminarAsistente(nodo: String?) {
+        asistente = false
+        nodo ?: return
+        asistentesHechos = asistentesHechos + nodo
+        prefs.edit { putStringSet("asistentes_hechos", asistentesHechos) }
+    }
+
     // --- Modo ruta: compañeros del grupo y alertas ---
 
     /** Nodos marcados como "de mi grupo" en la pestaña Ruta; solo ellos generan alertas. */

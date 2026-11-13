@@ -43,8 +43,18 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
+    }
+
+    // MapLibre trae librerías nativas para 4 arquitecturas: un APK arm64 (casi todos los teléfonos) y uno universal.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a")
+            isUniversalApk = true
         }
     }
 

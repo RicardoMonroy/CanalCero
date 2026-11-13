@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -52,6 +53,7 @@ import io.github.ricardomonroy.canalcero.mesh.chatDeClave
 import io.github.ricardomonroy.canalcero.mesh.tipoEmergencia
 import io.github.ricardomonroy.canalcero.mesh.MeshState
 import io.github.ricardomonroy.canalcero.mesh.idNodo
+import io.github.ricardomonroy.canalcero.mesh.esNodoNuevo
 import io.github.ricardomonroy.canalcero.mesh.noLeidos
 
 enum class Seccion(
@@ -81,7 +83,16 @@ fun CanalCeroApp(vm: MeshViewModel = viewModel()) {
     LaunchedEffect(Unit) {
         if (PERMISOS_AVISOS.any { !vm.malla.tiene(it) }) pedirAvisos.launch(PERMISOS_AVISOS)
     }
-    if (st.estado == Estado.DESCONECTADO) PantallaConexion(vm, st.error) else Principal(st, vm)
+    // Nodo de fábrica: el asistente se abre solo, una vez por nodo.
+    LaunchedEffect(st.estado, st.miNodo) {
+        val yo = st.miNodo ?: return@LaunchedEffect
+        if (st.estado == Estado.LISTO && st.esNodoNuevo() && idNodo(yo) !in vm.malla.asistentesHechos) vm.malla.asistente = true
+    }
+    when {
+        st.estado == Estado.DESCONECTADO -> PantallaConexion(vm, st.error)
+        vm.malla.asistente -> Surface(Modifier.fillMaxSize()) { Asistente(st, vm.malla) }
+        else -> Principal(st, vm)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -168,6 +179,7 @@ private fun Principal(
         Column(Modifier.padding(margen).fillMaxSize()) {
             AlertasSos(st, verEnMapa)
             AvisoConexion(st)
+            AvisoBateria(st, malla)
             if (abierto == null) AvisoEnVivo(st, malla)
             val c = abierto
             val a = ajustes
