@@ -54,6 +54,7 @@ import io.github.ricardomonroy.canalcero.mesh.idNodo
 import io.github.ricardomonroy.canalcero.mesh.puntoCardinal
 import io.github.ricardomonroy.canalcero.mesh.rumbo
 import io.github.ricardomonroy.canalcero.mesh.textoDistancia
+import io.github.ricardomonroy.canalcero.ui.Ajustes
 import io.github.ricardomonroy.canalcero.ui.Mapa
 import io.github.ricardomonroy.canalcero.ui.CanalCeroTheme
 import org.meshtastic.proto.NodeInfo
@@ -149,6 +150,11 @@ private fun Conectado(
         Tab(pestana == 0, { pestana = 0 }, text = { Text("Chats") })
         Tab(pestana == 1, { pestana = 1 }, text = { Text("Nodos (${st.nodos.size})") })
         Tab(pestana == 2, { pestana = 2 }, text = { Text("Mapa") })
+        Tab(pestana == 3, { pestana = 3 }, text = { Text("Ajustes") })
+    }
+    if (pestana == 3) {
+        Ajustes(st, vm.ble)
+        return
     }
     if (pestana == 2) {
         InterruptorUbicacion(vm)

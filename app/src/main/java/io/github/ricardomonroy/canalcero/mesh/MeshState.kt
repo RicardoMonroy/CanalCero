@@ -7,6 +7,7 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 import org.meshtastic.proto.Channel
+import org.meshtastic.proto.Config
 import org.meshtastic.proto.FromRadio
 import org.meshtastic.proto.MeshPacket
 import org.meshtastic.proto.NodeInfo
@@ -53,7 +54,9 @@ data class MeshState(
     val miNodo: Int? = null,
     val firmware: String? = null,
     val nodos: Map<Int, NodeInfo> = emptyMap(),
-    val canales: Map<Int, String> = emptyMap(),
+    /** Canales activos por índice (0 = primario). Se guardan completos: para editarlos hay que reenviarlos enteros. */
+    val canales: Map<Int, Channel> = emptyMap(),
+    val lora: Config.LoRaConfig? = null,
     // shortcut: solo en memoria, se pierde al desconectar. Persistir (Room) en el modo emergencia.
     val mensajes: List<Mensaje> = emptyList(),
     val error: String? = null,
@@ -62,7 +65,7 @@ data class MeshState(
 
     fun nombre(chat: Chat): String =
         when (chat) {
-            is Chat.Canal -> canales[chat.indice] ?: "Canal ${chat.indice}"
+            is Chat.Canal -> canales[chat.indice]?.let(::nombreCanal) ?: "Canal ${chat.indice}"
             is Chat.Directo -> nombre(chat.nodo)
         }
 }
@@ -77,18 +80,16 @@ fun MeshState.aplicar(
         fr.node_info != null -> copy(nodos = nodos + (fr.node_info.num to fr.node_info))
         fr.metadata != null -> copy(firmware = fr.metadata.firmware_version)
         fr.channel != null -> conCanal(fr.channel)
+        fr.config?.lora != null -> copy(lora = fr.config.lora)
         fr.packet != null -> recibir(fr.packet, ahora)
         fr.config_complete_id != null -> copy(estado = Estado.LISTO)
         else -> this
     }
 
-private fun MeshState.conCanal(c: Channel): MeshState =
-    if (c.role == Channel.Role.DISABLED) {
-        copy(canales = canales - c.index)
-    } else {
-        // El primario sin nombre usa el nombre del preset (LongFast) en la app oficial.
-        copy(canales = canales + (c.index to (c.settings?.name?.ifBlank { null } ?: if (c.index == 0) "Principal" else "Canal ${c.index}")))
-    }
+fun MeshState.conCanal(c: Channel): MeshState = if (c.role == Channel.Role.DISABLED) copy(canales = canales - c.index) else copy(canales = canales + (c.index to c))
+
+// El primario sin nombre usa el nombre del preset (LongFast) en la app oficial.
+fun nombreCanal(c: Channel): String = c.settings?.name?.ifBlank { null } ?: if (c.index == 0) "Principal" else "Canal ${c.index}"
 
 private fun MeshState.recibir(
     p: MeshPacket,

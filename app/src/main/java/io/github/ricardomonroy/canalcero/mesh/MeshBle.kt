@@ -26,6 +26,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import okio.ByteString.Companion.encodeUtf8
+import org.meshtastic.proto.AdminMessage
+import org.meshtastic.proto.Channel
+import org.meshtastic.proto.ChannelSettings
 import org.meshtastic.proto.Data
 import org.meshtastic.proto.FromRadio
 import org.meshtastic.proto.MeshPacket
@@ -33,6 +36,7 @@ import org.meshtastic.proto.NodeInfo
 import org.meshtastic.proto.PortNum
 import org.meshtastic.proto.Position
 import org.meshtastic.proto.ToRadio
+import org.meshtastic.proto.User
 import java.util.UUID
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -144,6 +148,80 @@ class MeshBle(
                 decoded = Data(portnum = PortNum.POSITION_APP, payload = p.encodeByteString()),
             )
         scope.launch { runCatching { enviar(g, ToRadio(packet = paquete)) }.onFailure { Log.w(TAG, "posición no enviada", it) } }
+    }
+
+    // --- Administración del nodo local (AdminMessage por ADMIN_APP) ---
+
+    // El nodo exige en cada set_* la session_passkey que manda en sus get_*_response; caduca a los 300 s.
+    private var passkey: okio.ByteString = okio.ByteString.EMPTY
+    private var passkeyHora = 0L
+    private var esperaPasskey: CompletableDeferred<Unit>? = null
+
+    private fun capturarPasskey(fr: FromRadio) {
+        val d = fr.packet?.decoded?.takeIf { it.portnum == PortNum.ADMIN_APP } ?: return
+        val k = runCatching { AdminMessage.ADAPTER.decode(d.payload).session_passkey }.getOrNull() ?: return
+        if (k.size == 0) return
+        passkey = k
+        passkeyHora = System.currentTimeMillis()
+        esperaPasskey?.complete(Unit)
+    }
+
+    private suspend fun enviarAdmin(
+        g: BluetoothGatt,
+        yo: Int,
+        m: AdminMessage,
+    ) = enviar(
+        g,
+        ToRadio(
+            packet =
+                MeshPacket(
+                    to = yo,
+                    id = Random.nextInt(1, Int.MAX_VALUE),
+                    decoded = Data(portnum = PortNum.ADMIN_APP, payload = m.encodeByteString(), want_response = m.get_owner_request == true),
+                ),
+        ),
+    )
+
+    /** Ejecuta cambios de configuración en una sola transacción (begin/commit evita reinicios intermedios). */
+    private suspend fun administrar(cambios: List<AdminMessage>) {
+        val g = gatt ?: error("sin conexión")
+        val yo = _state.value.miNodo ?: error("sin nodo")
+        if (System.currentTimeMillis() - passkeyHora > 240_000) {
+            val espera = CompletableDeferred<Unit>().also { esperaPasskey = it }
+            enviarAdmin(g, yo, AdminMessage(get_owner_request = true))
+            // La respuesta llega por FromRadio: vaciar() la captura.
+            withTimeout(TIMEOUT_MS) {
+                vaciar(g)
+                espera.await()
+            }
+        }
+        val todos = listOf(AdminMessage(begin_edit_settings = true)) + cambios + AdminMessage(commit_edit_settings = true)
+        todos.forEach { enviarAdmin(g, yo, it.copy(session_passkey = passkey)) }
+    }
+
+    /** Cambia el nombre que ven los demás nodos (largo y corto de hasta 4 caracteres). */
+    suspend fun renombrar(
+        largo: String,
+        corto: String,
+    ) {
+        val st = _state.value
+        val yo = st.miNodo ?: return
+        val nodo = st.nodos[yo] ?: NodeInfo(num = yo)
+        val usuario = (nodo.user ?: User(id = idNodo(yo))).copy(long_name = largo, short_name = corto)
+        administrar(listOf(AdminMessage(set_owner = usuario)))
+        _state.update { it.copy(nodos = it.nodos + (yo to nodo.copy(user = usuario))) }
+    }
+
+    /** Agrega un canal secundario y deja el primario público sin compartir posición. */
+    suspend fun agregarCanal(s: ChannelSettings) {
+        val st = _state.value
+        if (yaExiste(st.canales, s)) return
+        val indice = indiceLibre(st.canales) ?: error("El nodo ya tiene 8 canales")
+        val nuevo = Channel(index = indice, role = Channel.Role.SECONDARY, settings = s)
+        val cambios = mutableListOf(AdminMessage(set_channel = nuevo))
+        st.canales[0]?.let { cambios += AdminMessage(set_channel = primarioSinPosicion(it)) }
+        administrar(cambios)
+        _state.update { x -> cambios.mapNotNull { it.set_channel }.fold(x) { acc, c -> acc.conCanal(c) } }
     }
 
     fun desconectar() {
@@ -346,6 +424,7 @@ class MeshBle(
                 val bytes = op { g.readCharacteristic(c) }
                 if (bytes.isEmpty()) break
                 val fr = FromRadio.ADAPTER.decode(bytes)
+                capturarPasskey(fr)
                 _state.update { it.aplicar(fr, System.currentTimeMillis()) }
             }
         }

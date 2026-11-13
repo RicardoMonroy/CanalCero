@@ -19,6 +19,7 @@ App Android (Kotlin + Jetpack Compose) para comunicarse por LoRa con nodos Mesht
 
 - `mesh/MeshBle.kt`: cliente GATT (servicio `6ba1b218-…`). Handshake: escribir `ToRadio(want_config_id)` y leer `FromRadio` hasta recibir bytes vacíos; repetir cada vez que `FromNum` notifica.
 - `mesh/MeshState.kt`: estado + reductor puro `aplicar(FromRadio)`, probado en JVM (`app/src/test`).
+- `mesh/Canales.kt`: canal privado (PSK AES-256 aleatoria), enlace/QR compatible con la app oficial (`meshtastic.org/e/?add=true#<ChannelSet base64url>`). Admin local en `MeshBle.administrar()`: pide `session_passkey` con `get_owner_request` y envuelve los cambios en `begin/commit_edit_settings`.
 - Protobufs: copia del tag `v2.7.26` de meshtastic/protobufs en `app/src/main/proto`, generados con Wire. `nanopb.proto` vive en `app/src/main/proto-deps` (solo import). Para actualizar, reemplazar los `.proto` con un tag más nuevo.
 
 ## Build

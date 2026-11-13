@@ -64,7 +64,7 @@ wire {
     // nanopb.proto solo se importa (atak.proto usa sus opciones); no se genera código para él.
     protoPath { srcDir("src/main/proto-deps") }
     kotlin {}
-    root("meshtastic.FromRadio", "meshtastic.ToRadio", "meshtastic.Routing")
+    root("meshtastic.FromRadio", "meshtastic.ToRadio", "meshtastic.Routing", "meshtastic.AdminMessage", "meshtastic.ChannelSet")
 }
 
 dependencies {
@@ -74,6 +74,8 @@ dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.maplibre)
+    implementation(libs.zxing.core)
+    implementation(libs.code.scanner)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(libs.junit)
