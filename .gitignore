@@ -1,0 +1,20 @@
+# Build
+.gradle/
+build/
+.kotlin/
+local.properties
+captures/
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Secretos: nunca versionar
+*.jks
+*.keystore
+signing.properties
+*.psk
+secrets/
