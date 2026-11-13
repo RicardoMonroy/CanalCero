@@ -1,5 +1,19 @@
 package io.github.ricardomonroy.canalcero.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
+import androidx.compose.ui.Alignment
+import io.github.ricardomonroy.canalcero.Malla
+import io.github.ricardomonroy.canalcero.R
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
@@ -58,52 +72,129 @@ import kotlinx.coroutines.launch
 import org.meshtastic.proto.ChannelSettings
 import org.meshtastic.proto.Config
 
+enum class SubAjuste(
+    val titulo: String,
+) {
+    INICIO("Ajustes"),
+    MI_NODO("Mi nodo"),
+    UBICACION("Ubicación"),
+    CANALES("Canales"),
+    MAPAS("Mapas sin internet"),
+    APARIENCIA("Apariencia"),
+}
+
 @Composable
 fun Ajustes(
     st: MeshState,
     ble: MeshBle,
+    malla: Malla,
+    sub: SubAjuste,
+    ir: (SubAjuste?) -> Unit,
 ) {
     val alcance = rememberCoroutineScope()
     var aviso by remember { mutableStateOf<String?>(null) }
     var ocupado by remember { mutableStateOf(false) }
-    var qr by remember { mutableStateOf<String?>(null) }
-    var porUnirse by remember { mutableStateOf<ChannelSettings?>(null) }
-    var rolPendiente by remember { mutableStateOf<Rol?>(null) }
-    var saliendo by remember { mutableStateOf<Chat?>(null) }
-    saliendo?.let { OpcionesChat(st, it, ble) { saliendo = null } }
 
     // Las operaciones de admin pueden reiniciar el nodo: el error se muestra, no se oculta.
-    fun ejecutar(
-        listo: String,
-        accion: suspend () -> Unit,
-    ) {
+    val ejecutar = { listo: String, accion: suspend () -> Unit ->
         ocupado = true
         aviso = null
         alcance.launch {
             aviso = runCatching { accion() }.fold({ listo }, { "No se pudo: ${it.message}" })
             ocupado = false
         }
+        Unit
     }
 
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        aviso?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        aviso?.let {
+            Text(
+                it,
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer).padding(16.dp),
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+        when (sub) {
+            SubAjuste.INICIO -> Inicio(st, malla, ir)
+            SubAjuste.MI_NODO -> MiNodo(st, ble, ocupado, ejecutar)
+            SubAjuste.UBICACION -> Ubicacion(st, ble, malla, ocupado, ejecutar)
+            SubAjuste.CANALES -> Canales(st, ble, ocupado, ejecutar) { aviso = it }
+            SubAjuste.MAPAS -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { MapasSinInternet() }
+            SubAjuste.APARIENCIA -> Apariencia(malla)
+        }
+    }
+}
 
-        // Un nodo recién comprado viene sin región y no transmite nada.
+@Composable
+private fun Inicio(
+    st: MeshState,
+    malla: Malla,
+    ir: (SubAjuste?) -> Unit,
+) {
+    val yo = st.miNodo?.let { st.nodos[it]?.user }
+    val privados = st.canales.keys.count { it > 0 }
+    val perfil = st.cfgPosicion?.let { PerfilPosicion.de(it)?.nombre } ?: "personalizado"
+    // Un nodo nuevo viene sin región: se avisa arriba de todo, es lo primero que hay que arreglar.
+    if (st.lora.sinRegion()) {
+        Fila(R.drawable.ic_error, "Configura la región de tu nodo", "Sin región no puede transmitir", alerta = true) { ir(SubAjuste.MI_NODO) }
+    }
+    Seccion("Mi nodo")
+    Fila(R.drawable.ic_person, "Nombre, rol y región", listOfNotNull(yo?.long_name, ROLES.firstOrNull { it.rol == st.cfgDispositivo?.role }?.nombre).joinToString(" · ")) { ir(SubAjuste.MI_NODO) }
+    Seccion("Privacidad")
+    Fila(R.drawable.ic_location_on, "Ubicación", (if (malla.compartirUbicacion) "Compartiendo" else "No se comparte") + " · perfil $perfil") { ir(SubAjuste.UBICACION) }
+    Fila(R.drawable.ic_lock, "Canales", if (privados == 0) "Solo el público" else "$privados privado" + if (privados > 1) "s" else "") { ir(SubAjuste.CANALES) }
+    Seccion("App")
+    Fila(R.drawable.ic_download, "Mapas sin internet", "Zonas descargadas para usar sin red") { ir(SubAjuste.MAPAS) }
+    Fila(R.drawable.ic_palette, "Apariencia", malla.tema.nombre) { ir(SubAjuste.APARIENCIA) }
+    Spacer(Modifier.height(16.dp))
+    Fila(R.drawable.ic_link_off, "Desconectar nodo", "Deja de usar este nodo en el teléfono", alerta = true) {
+        ir(null)
+        malla.desconectar()
+    }
+}
+
+@Composable
+private fun Fila(
+    @DrawableRes icono: Int,
+    titulo: String,
+    detalle: String,
+    alerta: Boolean = false,
+    tocar: () -> Unit,
+) = Row(
+    Modifier.fillMaxWidth().clickable(onClick = tocar).padding(horizontal = 16.dp, vertical = 14.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(16.dp),
+) {
+    val color = if (alerta) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+    Icono(icono, null, tint = color)
+    Column(Modifier.weight(1f)) {
+        Text(titulo, style = MaterialTheme.typography.bodyLarge, color = if (alerta) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+        if (detalle.isNotBlank()) Text(detalle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (!alerta) Icono(R.drawable.ic_chevron_right, null)
+}
+
+@Composable
+private fun MiNodo(
+    st: MeshState,
+    ble: MeshBle,
+    ocupado: Boolean,
+    ejecutar: (String, suspend () -> Unit) -> Unit,
+) {
+    var rolPendiente by remember { mutableStateOf<Rol?>(null) }
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (st.lora.sinRegion()) {
             Text("Tu nodo no tiene región: no puede transmitir.", color = MaterialTheme.colorScheme.error)
             Button(
-                onClick = { ejecutar("Región configurada. El nodo se reinicia: vuelve a conectarte.") { ble.configurar(Config(lora = st.lora.paraMexico())) } },
+                onClick = { ejecutar("Región configurada. El nodo se reinicia y se reconecta solo.") { ble.configurar(Config(lora = st.lora.paraMexico())) } },
                 enabled = !ocupado,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Configurar para México (915 MHz)") }
-            HorizontalDivider()
         }
-
-        // --- Nombre ---
         val yo = st.miNodo?.let { st.nodos[it]?.user }
         var largo by rememberSaveable(yo?.long_name) { mutableStateOf(yo?.long_name.orEmpty()) }
         var corto by rememberSaveable(yo?.short_name) { mutableStateOf(yo?.short_name.orEmpty()) }
-        Text("Nombre de tu nodo", style = MaterialTheme.typography.titleMedium)
+        Text("Nombre", style = MaterialTheme.typography.titleMedium)
         CampoBytes("Nombre", largo, MAX_BYTES_NOMBRE_LARGO) { largo = it }
         CampoBytes("Nombre corto (en el mapa)", corto, MAX_BYTES_NOMBRE_CORTO) { corto = it }
         Button(
@@ -111,59 +202,112 @@ fun Ajustes(
             enabled = !ocupado && largo.isNotBlank() && corto.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Guardar nombre") }
+    }
+    st.cfgDispositivo?.let { cfg ->
+        Seccion("Rol")
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            ROLES.forEach { r -> Opcion(r.nombre, r.detalle, elegida = r.rol == cfg.role, habilitada = !ocupado) { rolPendiente = r } }
+            if (ROLES.none { it.rol == cfg.role }) Text("Rol actual: ${cfg.role}", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+    rolPendiente?.let { r ->
+        AlertDialog(
+            onDismissRequest = { rolPendiente = null },
+            title = { Text("¿Cambiar a \"${r.nombre}\"?") },
+            text = { Text(listOfNotNull(r.detalle, r.aviso, "El nodo se reinicia y la app se reconecta sola.").joinToString("\n\n")) },
+            confirmButton = {
+                Button(onClick = {
+                    rolPendiente = null
+                    val cfg = st.cfgDispositivo ?: return@Button
+                    ejecutar("Rol cambiado a ${r.nombre}. El nodo se reinicia.") { ble.configurar(Config(device = cfg.copy(role = r.rol))) }
+                }) { Text("Cambiar") }
+            },
+            dismissButton = { TextButton(onClick = { rolPendiente = null }) { Text("Cancelar") } },
+        )
+    }
+}
 
-        HorizontalDivider()
-
-        // --- Posición ---
-        st.cfgPosicion?.let { cfg ->
-            val actual = PerfilPosicion.de(cfg)
-            Text("Cada cuánto transmite tu posición", style = MaterialTheme.typography.titleMedium)
+@Composable
+private fun Ubicacion(
+    st: MeshState,
+    ble: MeshBle,
+    malla: Malla,
+    ocupado: Boolean,
+    ejecutar: (String, suspend () -> Unit) -> Unit,
+) {
+    val alternar = alternadorUbicacion(malla)
+    Row(
+        Modifier.fillMaxWidth().clickable { alternar(!malla.compartirUbicacion) }.padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Compartir mi ubicación", style = MaterialTheme.typography.bodyLarge)
+            Text("El teléfono le da tu ubicación al nodo; el nodo la envía con la precisión de cada canal.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = malla.compartirUbicacion, onCheckedChange = alternar)
+    }
+    st.cfgPosicion?.let { cfg ->
+        val actual = PerfilPosicion.de(cfg)
+        Seccion("Cada cuánto se envía")
+        Column(Modifier.padding(horizontal = 16.dp)) {
             if (actual == null) Text("Configuración personalizada (hecha en otra app).", style = MaterialTheme.typography.bodySmall)
             PerfilPosicion.entries.forEach { p ->
                 Opcion(p.nombre, p.detalle, elegida = p == actual, habilitada = !ocupado) {
                     ejecutar("Posición: perfil ${p.nombre}") { ble.configurar(Config(position = p.aplicar(cfg))) }
                 }
             }
-            HorizontalDivider()
         }
+    }
+    Seccion("Quién la ve")
+    Text(
+        "Canal público: " + (if ((st.canales[0]?.settings?.module_settings?.position_precision ?: 0) == 0) "nadie." else "aproximada (±km) para cualquiera cerca.") +
+            "\nCanales privados: exacta, solo sus miembros.\nMensaje directo: exacta, con el botón de ubicación del chat.",
+        Modifier.padding(horizontal = 16.dp),
+        style = MaterialTheme.typography.bodyMedium,
+    )
+}
 
-        // --- Rol ---
-        st.cfgDispositivo?.let { cfg ->
-            Text("Rol del nodo", style = MaterialTheme.typography.titleMedium)
-            ROLES.forEach { r ->
-                Opcion(r.nombre, r.detalle, elegida = r.rol == cfg.role, habilitada = !ocupado) { rolPendiente = r }
+@Composable
+private fun Canales(
+    st: MeshState,
+    ble: MeshBle,
+    ocupado: Boolean,
+    ejecutar: (String, suspend () -> Unit) -> Unit,
+    avisar: (String) -> Unit,
+) {
+    var qr by remember { mutableStateOf<String?>(null) }
+    var porUnirse by remember { mutableStateOf<ChannelSettings?>(null) }
+    var saliendo by remember { mutableStateOf<Chat?>(null) }
+    saliendo?.let { OpcionesChat(st, it, ble) { saliendo = null } }
+
+    st.canales.values.sortedBy { it.index }.forEach { c ->
+        val s = c.settings
+        val prec = s?.module_settings?.position_precision ?: 0
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            AvatarChat(st, Chat.Canal(c.index), 40.dp)
+            Column(Modifier.weight(1f)) {
+                Text(nombreCanal(c), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    (if (c.index == 0) "Público" else "Privado") + " · ubicación " +
+                        when (prec) {
+                            0 -> "no se comparte"
+                            32 -> "exacta"
+                            else -> "aproximada"
+                        },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            if (ROLES.none { it.rol == cfg.role }) Text("Rol actual: ${cfg.role}", style = MaterialTheme.typography.bodySmall)
-            HorizontalDivider()
-        }
-
-        // --- Canales ---
-        Text("Canales", style = MaterialTheme.typography.titleMedium)
-        st.canales.values.sortedBy { it.index }.forEach { c ->
-            val s = c.settings
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text("# " + nombreCanal(c))
-                    val prec = s?.module_settings?.position_precision ?: 0
-                    Text(
-                        (if (c.index == 0) "Público" else "Privado") + " · ubicación " +
-                            when (prec) {
-                                0 -> "no se comparte"
-                                32 -> "exacta"
-                                else -> "aproximada"
-                            },
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                if (c.index > 0 && s != null) {
-                    TextButton(onClick = { qr = urlCanal(s, st.lora) }) { Text("Compartir") }
-                    TextButton(onClick = { saliendo = Chat.Canal(c.index) }) { Text("Salir", color = MaterialTheme.colorScheme.error) }
-                }
+            if (c.index > 0 && s != null) {
+                IconButton(onClick = { qr = urlCanal(s, st.lora) }) { Icono(R.drawable.ic_share, "Compartir") }
+                IconButton(onClick = { saliendo = Chat.Canal(c.index) }) { Icono(R.drawable.ic_logout, "Salir", tint = MaterialTheme.colorScheme.error) }
             }
         }
-
+    }
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Seccion("Crear canal privado")
         var nuevo by rememberSaveable { mutableStateOf("") }
-        CampoBytes("Nombre del canal privado", nuevo, MAX_BYTES_NOMBRE_CANAL) { nuevo = it }
+        CampoBytes("Nombre (ej. Familia)", nuevo, MAX_BYTES_NOMBRE_CANAL) { nuevo = it }
         Button(
             onClick = {
                 val s = canalPrivado(nuevo.trim())
@@ -176,33 +320,15 @@ fun Ajustes(
             enabled = !ocupado && nuevo.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Crear canal privado") }
-
-        Unirse(alInterpretar = { porUnirse = it }, alError = { aviso = it })
-
-        HorizontalDivider()
-        MapasSinInternet()
+        Seccion("Unirme a un canal")
+        Unirse(alInterpretar = { porUnirse = it }, alError = avisar)
         Text(
             "Al crear o unirte a un canal privado, tu ubicación deja de enviarse por el canal público y va exacta solo por el privado.",
             style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-
     qr?.let { url -> DialogoQr(url) { qr = null } }
-    rolPendiente?.let { r ->
-        AlertDialog(
-            onDismissRequest = { rolPendiente = null },
-            title = { Text("¿Cambiar a \"${r.nombre}\"?") },
-            text = { Text(listOfNotNull(r.detalle, r.aviso, "El nodo se reinicia y tendrás que volver a conectarte.").joinToString("\n\n")) },
-            confirmButton = {
-                Button(onClick = {
-                    rolPendiente = null
-                    val cfg = st.cfgDispositivo ?: return@Button
-                    ejecutar("Rol cambiado a ${r.nombre}. El nodo se reinicia: vuelve a conectarte.") { ble.configurar(Config(device = cfg.copy(role = r.rol))) }
-                }) { Text("Cambiar") }
-            },
-            dismissButton = { TextButton(onClick = { rolPendiente = null }) { Text("Cancelar") } },
-        )
-    }
     porUnirse?.let { s ->
         AlertDialog(
             onDismissRequest = { porUnirse = null },
@@ -216,6 +342,39 @@ fun Ajustes(
             },
             dismissButton = { TextButton(onClick = { porUnirse = null }) { Text("Cancelar") } },
         )
+    }
+}
+
+@Composable
+private fun Apariencia(malla: Malla) {
+    Seccion("Tema de la app")
+    Column(Modifier.padding(horizontal = 16.dp)) {
+        TemaApp.entries.forEach { t -> Opcion(t.nombre, "", elegida = malla.tema == t, habilitada = true) { malla.cambiarTema(t) } }
+    }
+    Seccion("Mapa")
+    Row(Modifier.fillMaxWidth().clickable { malla.alternarEstilo() }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Mapa claro", style = MaterialTheme.typography.bodyLarge)
+            Text("Independiente del tema de la app. También se cambia con el botón del mapa.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = malla.estiloClaro, onCheckedChange = { malla.alternarEstilo() })
+    }
+}
+
+/** Activa o desactiva la ubicación pidiendo el permiso si hace falta. */
+@Composable
+fun alternadorUbicacion(malla: Malla): (Boolean) -> Unit {
+    val ctx = LocalContext.current
+    val pedir =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+            if (r[Manifest.permission.ACCESS_FINE_LOCATION] == true) malla.alternarUbicacion(true)
+        }
+    return { on ->
+        if (!on || ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            malla.alternarUbicacion(on)
+        } else {
+            pedir.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
     }
 }
 
@@ -292,7 +451,7 @@ private fun Opcion(
     RadioButton(selected = elegida, onClick = null, enabled = habilitada)
     Column(Modifier.padding(start = 8.dp)) {
         Text(nombre)
-        Text(detalle, style = MaterialTheme.typography.bodySmall)
+        if (detalle.isNotBlank()) Text(detalle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -326,8 +485,7 @@ private fun MapasSinInternet() {
     // Se vuelve a listar al terminar una descarga (progreso pasa a null).
     LaunchedEffect(progreso == null) { ZonasOffline.listar(ctx) { zonas = it } }
 
-    Text("Mapas sin internet", style = MaterialTheme.typography.titleMedium)
-    Text("Para descargar, ve a la zona en Mapa y toca ⤓.", style = MaterialTheme.typography.bodySmall)
+    Text("Para descargar una zona, muévete a ella en Mapa y toca el botón de descarga. En el mapa verás su contorno punteado.", style = MaterialTheme.typography.bodyMedium)
     progreso?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
     zonas?.forEach { z ->
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

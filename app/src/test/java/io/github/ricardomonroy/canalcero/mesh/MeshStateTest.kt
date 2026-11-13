@@ -123,4 +123,27 @@ class MeshStateTest {
         assertEquals(listOf(directo, mio), st.sinChat(Chat.Canal(1)).mensajes)
         assertEquals(listOf(canal, directo), st.sinMensaje(mio).mensajes) // (de, id) distingue
     }
+
+    @Test
+    fun noLeidosPorConversacion() {
+        val st =
+            MeshState(
+                miNodo = yo,
+                mensajes =
+                    listOf(
+                        Mensaje(1, otro, BROADCAST, 0, "viejo", 100, Entrega.RECIBIDO),
+                        Mensaje(2, otro, BROADCAST, 0, "nuevo", 300, Entrega.RECIBIDO),
+                        Mensaje(3, otro, yo, 0, "dm", 50, Entrega.RECIBIDO),
+                        Mensaje(4, yo, otro, 0, "mío no cuenta", 400, Entrega.ENTREGADO),
+                    ),
+            )
+        assertEquals(mapOf(Chat.Canal(0) to 2, Chat.Directo(otro) to 1), st.noLeidos(emptyMap()))
+        assertEquals(mapOf(Chat.Canal(0) to 1), st.noLeidos(mapOf("c0" to 200L, "d$otro" to 60L)))
+    }
+
+    @Test
+    fun nivelesDeSenal() {
+        assertEquals(listOf(4, 3, 2, 1, 0), listOf(8f, 0f, -7f, -15f, -18f).map(::nivelSenal))
+        assertEquals(listOf(4, 3, 2, 1, 0), listOf(-50, -70, -80, -90, -95).map(::nivelRssi))
+    }
 }

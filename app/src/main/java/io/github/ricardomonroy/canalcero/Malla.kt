@@ -24,6 +24,9 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import androidx.core.util.AtomicFile
 import io.github.ricardomonroy.canalcero.mesh.Alerta
+import io.github.ricardomonroy.canalcero.mesh.Chat
+import io.github.ricardomonroy.canalcero.mesh.clave
+import io.github.ricardomonroy.canalcero.ui.TemaApp
 import io.github.ricardomonroy.canalcero.mesh.Entrega
 import io.github.ricardomonroy.canalcero.mesh.SIN_SENAL_SEG
 import io.github.ricardomonroy.canalcero.mesh.alertas
@@ -65,6 +68,25 @@ class Malla(
 
     var compartirUbicacion by mutableStateOf(false)
         private set
+
+    var tema by mutableStateOf(runCatching { TemaApp.valueOf(prefs.getString("tema", null)!!) }.getOrDefault(TemaApp.SISTEMA))
+        private set
+
+    fun cambiarTema(t: TemaApp) {
+        tema = t
+        prefs.edit { putString("tema", t.name) }
+    }
+
+    /** Hora en que se abrió por última vez cada conversación (clave de Chat → ms), para contar no leídos. */
+    var leidos by mutableStateOf(
+        prefs.getStringSet("leidos", emptySet())!!.mapNotNull { e -> e.split('=').takeIf { it.size == 2 }?.let { it[0] to (it[1].toLongOrNull() ?: 0L) } }.toMap(),
+    )
+        private set
+
+    fun marcarLeido(c: Chat) {
+        leidos = leidos + (c.clave() to System.currentTimeMillis())
+        prefs.edit { putStringSet("leidos", leidos.map { (k, v) -> "$k=$v" }.toSet()) }
+    }
 
     /** Claro por defecto: el oscuro casi no se lee al sol. */
     var estiloClaro by mutableStateOf(prefs.getBoolean("estilo_claro", true))
@@ -128,14 +150,6 @@ class Malla(
                 .setAutoCancel(true)
                 .build()
         NotificationManagerCompat.from(app).notify(ID_ALERTA + num, n)
-    }
-
-    init {
-        crearCanalesDeNotificacion()
-        vigilarGrupo()
-        guardarHistorialAlCambiar()
-        avisarMensajesNuevos()
-        reconectarUltimoNodo()
     }
 
     fun conectar(d: BluetoothDevice) {
@@ -250,6 +264,16 @@ class Malla(
         } else {
             app.checkSelfPermission(permiso) == PackageManager.PERMISSION_GRANTED
         }
+
+    // Al final a propósito: en Kotlin init corre en orden de declaración, y reconectar usa propiedades
+    // declaradas arriba (escuchaUbicacion era null y tronaba al abrir con "Compartir ubicación" activo).
+    init {
+        crearCanalesDeNotificacion()
+        vigilarGrupo()
+        guardarHistorialAlCambiar()
+        avisarMensajesNuevos()
+        reconectarUltimoNodo()
+    }
 
     companion object {
         const val CANAL_SERVICIO = "servicio"

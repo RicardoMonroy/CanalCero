@@ -6,9 +6,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,6 +31,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import io.github.ricardomonroy.canalcero.R
 import io.github.ricardomonroy.canalcero.malla
 import io.github.ricardomonroy.canalcero.mesh.MeshState
 import io.github.ricardomonroy.canalcero.mesh.esAproximada
@@ -78,6 +82,7 @@ private val QUERETARO = LatLng(20.5888, -100.3899)
 fun Mapa(
     st: MeshState,
     modifier: Modifier = Modifier,
+    enfocar: Int? = null,
 ) {
     val ctx = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -143,15 +148,25 @@ fun Mapa(
             ZonasOffline.progreso?.let {
                 Text(it, Modifier.background(Color(0xCC1C1F23)).padding(6.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFFF4EFE6))
             }
-            SmallFloatingActionButton(containerColor = MaterialTheme.colorScheme.primary, onClick = { malla.alternarEstilo() }) {
-                Text(if (claro) "🌙" else "☀", style = MaterialTheme.typography.titleMedium)
+            SmallFloatingActionButton(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh, onClick = { malla.alternarEstilo() }) {
+                Icono(if (claro) R.drawable.ic_dark_mode else R.drawable.ic_light_mode, if (claro) "Mapa oscuro" else "Mapa claro", tint = MaterialTheme.colorScheme.onSurface)
             }
             if (ZonasOffline.progreso == null) {
                 SmallFloatingActionButton(containerColor = MaterialTheme.colorScheme.primary, onClick = { vista.getMapAsync { m -> pidiendo = m.projection.visibleRegion.latLngBounds } }) {
-                    Text("⤓", style = MaterialTheme.typography.titleLarge)
+                    Icono(R.drawable.ic_download, "Descargar esta zona", tint = MaterialTheme.colorScheme.onPrimary)
                 }
             }
         }
+        // Arriba a la izquierda: la brújula de MapLibre ocupa la esquina derecha.
+        val alternar = alternadorUbicacion(malla)
+        FilterChip(
+            selected = malla.compartirUbicacion,
+            onClick = { alternar(!malla.compartirUbicacion) },
+            label = { Text(if (malla.compartirUbicacion) "Compartiendo ubicación" else "Compartir ubicación") },
+            leadingIcon = { Icono(R.drawable.ic_location_on, null, Modifier.size(18.dp)) },
+            colors = FilterChipDefaults.filterChipColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+        )
     }
     pidiendo?.let { b -> DialogoDescarga(b) { pidiendo = null } }
 
@@ -176,7 +191,7 @@ fun Mapa(
         }
     }
 
-    LaunchedEffect(st.nodos, estilo, claro) {
+    LaunchedEffect(st.nodos, estilo, claro, enfocar) {
         val s = estilo ?: return@LaunchedEffect
         val puntos =
             st.nodos.values.mapNotNull { n ->
@@ -192,6 +207,12 @@ fun Mapa(
                     }
             }
         s.getSourceAs<GeoJsonSource>("nodos")?.setGeoJson(FeatureCollection.fromFeatures(puntos.map { it.second }))
+        val foco = enfocar?.let { st.nodos[it]?.position.grados() }
+        if (foco != null) {
+            centrado = true
+            vista.getMapAsync { m -> m.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(foco.first, foco.second), 15.0)) }
+            return@LaunchedEffect
+        }
         if (centrado || puntos.isEmpty()) return@LaunchedEffect
         centrado = true
         vista.getMapAsync { m ->

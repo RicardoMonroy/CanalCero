@@ -1,6 +1,9 @@
 package io.github.ricardomonroy.canalcero.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,7 +13,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 import io.github.ricardomonroy.canalcero.Malla
+import io.github.ricardomonroy.canalcero.R
 import io.github.ricardomonroy.canalcero.mesh.Alerta
 import io.github.ricardomonroy.canalcero.mesh.MeshState
 import io.github.ricardomonroy.canalcero.mesh.alertas
@@ -48,24 +51,29 @@ fun Ruta(
     val lista = companeros(st, ahora)
     val activas = alertas(lista, malla.grupo, malla.umbralKm * 1000.0)
 
-    Column(Modifier.padding(vertical = 8.dp)) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (!malla.compartirUbicacion) {
-            Text("Activa \"Compartir mi ubicación\" en Mapa para ver distancias.", color = MaterialTheme.colorScheme.error)
+            Text("Activa \"Compartir ubicación\" en Mapa para ver distancias.", color = MaterialTheme.colorScheme.error)
         }
         Text("Marca a tu grupo: te aviso si alguien se aleja o pierde señal.", style = MaterialTheme.typography.bodySmall)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Avisar a más de", style = MaterialTheme.typography.bodySmall)
             listOf(1, 2, 5, 10).forEach { km ->
                 FilterChip(selected = malla.umbralKm == km, onClick = { malla.cambiarUmbral(km) }, label = { Text("$km km") })
             }
         }
     }
-    if (lista.isEmpty()) Text("No se ha oído a ningún nodo en las últimas 2 horas.")
+    if (lista.isEmpty()) {
+        Vacio(R.drawable.ic_route, "Nadie cerca todavía", "Aquí verás a quién oye tu nodo en las últimas 2 horas, con su distancia y dirección.")
+        return
+    }
     LazyColumn {
         items(lista, key = { it.num }) { c ->
             val alerta = activas[c.num]
-            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = c.num in malla.grupo, onCheckedChange = { malla.alternarGrupo(c.num) })
+                Avatar(st.nodos[c.num]?.user?.short_name?.ifBlank { null } ?: c.nombre.take(2), tonoDe(c.num), 40.dp)
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(c.nombre, style = MaterialTheme.typography.titleMedium)
                     val hace = c.haceSeg?.let { if (it < 60) "ahora" else "hace ${it / 60} min" }
@@ -92,7 +100,6 @@ fun Ruta(
                     Text("sin posición", Modifier.width(90.dp), style = MaterialTheme.typography.bodySmall)
                 }
             }
-            HorizontalDivider()
         }
     }
 }

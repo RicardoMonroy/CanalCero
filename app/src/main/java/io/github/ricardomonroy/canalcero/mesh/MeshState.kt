@@ -197,3 +197,41 @@ fun textoDistancia(m: Double): String = if (m < 1000) "${m.toInt()} m" else "%.1
 
 /** Id de nodo en el formato que muestra Meshtastic: !8fccfdc0 */
 fun idNodo(num: Int): String = "!%08x".format(num)
+
+/** Clave estable de una conversación para guardar qué se ha leído. */
+fun Chat.clave(): String =
+    when (this) {
+        is Chat.Canal -> "c$indice"
+        is Chat.Directo -> "d$nodo"
+    }
+
+/** Mensajes recibidos después de la última vez que se abrió cada conversación. [leidos]: clave → hora en ms. */
+fun MeshState.noLeidos(leidos: Map<String, Long>): Map<Chat, Int> =
+    mensajes
+        .filter { it.entrega == Entrega.RECIBIDO }
+        .groupBy { it.chat(miNodo) }
+        .mapValues { (c, ms) -> ms.count { it.hora > (leidos[c.clave()] ?: 0L) } }
+        .filterValues { it > 0 }
+
+/**
+ * Nivel de señal 0–4 a partir del SNR de LoRa. LoRa decodifica hasta ~-20 dB con LongFast, así que
+ * un SNR negativo todavía es usable (no como en WiFi).
+ */
+fun nivelSenal(snr: Float): Int =
+    when {
+        snr >= 5f -> 4
+        snr >= 0f -> 3
+        snr >= -7f -> 2
+        snr >= -15f -> 1
+        else -> 0
+    }
+
+/** Nivel 0–4 a partir del RSSI de Bluetooth al escanear (qué tan cerca está el nodo del teléfono). */
+fun nivelRssi(rssi: Int): Int =
+    when {
+        rssi >= -60 -> 4
+        rssi >= -70 -> 3
+        rssi >= -80 -> 2
+        rssi >= -90 -> 1
+        else -> 0
+    }
