@@ -26,6 +26,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -46,7 +47,14 @@ import io.github.ricardomonroy.canalcero.mesh.Chat
 import io.github.ricardomonroy.canalcero.mesh.Estado
 import io.github.ricardomonroy.canalcero.ui.PantallaChat
 import io.github.ricardomonroy.canalcero.mesh.MeshState
+import io.github.ricardomonroy.canalcero.mesh.distancia
+import io.github.ricardomonroy.canalcero.mesh.esAproximada
+import io.github.ricardomonroy.canalcero.mesh.grados
 import io.github.ricardomonroy.canalcero.mesh.idNodo
+import io.github.ricardomonroy.canalcero.mesh.puntoCardinal
+import io.github.ricardomonroy.canalcero.mesh.rumbo
+import io.github.ricardomonroy.canalcero.mesh.textoDistancia
+import io.github.ricardomonroy.canalcero.ui.Mapa
 import io.github.ricardomonroy.canalcero.ui.CanalCeroTheme
 import org.meshtastic.proto.NodeInfo
 
@@ -140,7 +148,14 @@ private fun Conectado(
     TabRow(selectedTabIndex = pestana) {
         Tab(pestana == 0, { pestana = 0 }, text = { Text("Chats") })
         Tab(pestana == 1, { pestana = 1 }, text = { Text("Nodos (${st.nodos.size})") })
+        Tab(pestana == 2, { pestana = 2 }, text = { Text("Mapa") })
     }
+    if (pestana == 2) {
+        InterruptorUbicacion(vm)
+        Mapa(st, Modifier.fillMaxSize())
+        return
+    }
+    val desde = st.miNodo?.let { st.nodos[it]?.position.grados() }
     val ahora = System.currentTimeMillis() / 1000
     LazyColumn {
         if (pestana == 0) {
@@ -156,10 +171,39 @@ private fun Conectado(
         } else {
             items(st.nodos.values.sortedByDescending { it.last_heard }, key = { it.num }) { n ->
                 val esMio = n.num == st.miNodo
-                Box(Modifier.clickable(enabled = !esMio) { abierto = Chat.Directo(n.num) }) { FilaNodo(n, esMio, ahora) }
+                Box(Modifier.clickable(enabled = !esMio) { abierto = Chat.Directo(n.num) }) { FilaNodo(n, esMio, ahora, desde) }
                 HorizontalDivider()
             }
         }
+    }
+}
+
+@Composable
+private fun InterruptorUbicacion(vm: MeshViewModel) {
+    val ctx = LocalContext.current
+    val pedir =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+            if (r[Manifest.permission.ACCESS_FINE_LOCATION] == true) vm.alternarUbicacion(true)
+        }
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Compartir mi ubicación")
+            Text(
+                "Tu nodo la transmite con la precisión de cada canal.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Switch(
+            checked = vm.compartirUbicacion,
+            onCheckedChange = { on ->
+                val permitido = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (!on || permitido) {
+                    vm.alternarUbicacion(on)
+                } else {
+                    pedir.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                }
+            },
+        )
     }
 }
 
@@ -181,7 +225,9 @@ private fun FilaNodo(
     n: NodeInfo,
     esMio: Boolean,
     ahora: Long,
+    desde: Pair<Double, Double>?,
 ) {
+    val donde = n.position.grados()
     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         Text(
             (n.user?.long_name ?: idNodo(n.num)) + if (esMio) "  (tu nodo)" else "",
@@ -195,6 +241,12 @@ private fun FilaNodo(
                 if (n.last_heard > 0) "visto hace ${hace(ahora - n.last_heard)}" else null,
                 n.hops_away?.let { if (it == 0) "directo" else "$it saltos" },
                 if (!esMio && n.snr != 0f) "SNR ${"%.1f".format(n.snr)} dB" else null,
+                if (!esMio && desde != null && donde != null) {
+                    val aprox = if (n.position!!.esAproximada()) "≈ " else ""
+                    "$aprox${textoDistancia(distancia(desde, donde))} ${puntoCardinal(rumbo(desde, donde))}"
+                } else {
+                    null
+                },
             )
         Text(detalles.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
     }

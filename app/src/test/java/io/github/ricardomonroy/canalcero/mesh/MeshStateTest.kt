@@ -7,6 +7,7 @@ import org.meshtastic.proto.Data
 import org.meshtastic.proto.DeviceMetadata
 import org.meshtastic.proto.MeshPacket
 import org.meshtastic.proto.PortNum
+import org.meshtastic.proto.Position
 import org.meshtastic.proto.Routing
 import org.meshtastic.proto.FromRadio
 import org.meshtastic.proto.MyNodeInfo
@@ -72,5 +73,26 @@ class MeshStateTest {
 
         assertEquals(listOf(Entrega.ENTREGADO, Entrega.FALLO), st.mensajes.map { it.entrega })
         assertEquals(Chat.Directo(otro), enviado.chat(yo)) // mi mensaje directo va al chat del destinatario
+    }
+
+    @Test
+    fun posicionRecibidaYDistancia() {
+        // Centro de Querétaro y presa de Zimapán (aprox.).
+        val qro = Position(latitude_i = 205_888_000, longitude_i = -1_003_899_000, precision_bits = 32)
+        val zim = Position(latitude_i = 207_180_000, longitude_i = -994_470_000, precision_bits = 13)
+        var st = MeshState(miNodo = yo)
+        st = st.aplicar(paquete(otro, BROADCAST, Data(portnum = PortNum.POSITION_APP, payload = zim.encodeByteString())), 0)
+        // Posición vacía (sin fix) no borra la anterior.
+        st = st.aplicar(paquete(otro, BROADCAST, Data(portnum = PortNum.POSITION_APP, payload = Position().encodeByteString())), 0)
+
+        val donde = st.nodos[otro]?.position.grados()!!
+        assertEquals(20.718, donde.first, 1e-6)
+        assertEquals(true, st.nodos[otro]?.position?.esAproximada())
+        val d = distancia(qro.grados()!!, donde)
+        assertEquals(99_000.0, d, 2_000.0) // ~99 km en línea recta
+        assertEquals("E", puntoCardinal(rumbo(qro.grados()!!, donde)))
+        assertEquals(null, Position(latitude_i = 0, longitude_i = 0).grados())
+        assertEquals(false, qro.esAproximada())
+        assertEquals(true, Position(latitude_i = 1, longitude_i = 1).esAproximada()) // precisión desconocida
     }
 }

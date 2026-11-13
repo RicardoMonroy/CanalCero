@@ -8,6 +8,10 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Build
+import android.os.Looper
 import android.os.ParcelUuid
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -69,6 +73,27 @@ class MeshViewModel(
         escaneando = false
     }
 
+    // shortcut: el estado del interruptor no se guarda entre sesiones; persistirlo con los ajustes.
+    var compartirUbicacion by mutableStateOf(false)
+        private set
+
+    private val lm get() = getApplication<Application>().getSystemService(LocationManager::class.java)
+
+    private val escuchaUbicacion =
+        LocationListener { l -> ble.enviarPosicion(l.latitude, l.longitude, if (l.hasAltitude()) l.altitude.toInt() else null) }
+
+    /** La UI pide ACCESS_FINE_LOCATION antes de activar. */
+    fun alternarUbicacion(activar: Boolean) {
+        compartirUbicacion = activar
+        lm.removeUpdates(escuchaUbicacion)
+        if (!activar) return
+        val proveedor =
+            if (Build.VERSION.SDK_INT >= 31 && lm.hasProvider(LocationManager.FUSED_PROVIDER)) LocationManager.FUSED_PROVIDER else LocationManager.GPS_PROVIDER
+        lm.getLastKnownLocation(proveedor)?.let(escuchaUbicacion::onLocationChanged)
+        // Cada 30 s o 25 m como mínimo: más seguido saturaría el canal LoRa.
+        lm.requestLocationUpdates(proveedor, 30_000L, 25f, escuchaUbicacion, Looper.getMainLooper())
+    }
+
     fun conectar(e: Encontrado) {
         detenerEscaneo()
         ble.conectar(e.device)
@@ -76,6 +101,7 @@ class MeshViewModel(
 
     override fun onCleared() {
         detenerEscaneo()
+        lm.removeUpdates(escuchaUbicacion)
         ble.desconectar()
     }
 }

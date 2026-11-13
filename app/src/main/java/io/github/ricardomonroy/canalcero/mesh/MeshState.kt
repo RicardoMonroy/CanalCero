@@ -1,10 +1,17 @@
 package io.github.ricardomonroy.canalcero.mesh
 
+import kotlin.math.asin
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 import org.meshtastic.proto.Channel
 import org.meshtastic.proto.FromRadio
 import org.meshtastic.proto.MeshPacket
 import org.meshtastic.proto.NodeInfo
 import org.meshtastic.proto.PortNum
+import org.meshtastic.proto.Position
 import org.meshtastic.proto.Routing
 import org.meshtastic.proto.User
 
@@ -98,6 +105,8 @@ private fun MeshState.recibir(
 
         PortNum.NODEINFO_APP -> nodo = nodo.copy(user = User.ADAPTER.decode(d.payload))
 
+        PortNum.POSITION_APP -> Position.ADAPTER.decode(d.payload).takeIf { it.latitude_i != null }?.let { nodo = nodo.copy(position = it) }
+
         PortNum.ROUTING_APP -> {
             // Respuesta de enrutamiento a un paquete nuestro: request_id es el id que mandamos.
             val ok = (Routing.ADAPTER.decode(d.payload).error_reason ?: Routing.Error.NONE) == Routing.Error.NONE
@@ -114,6 +123,49 @@ private fun MeshState.recibir(
     }
     return st.copy(nodos = st.nodos + (p.from to nodo))
 }
+
+/** Coordenadas en grados, o null si el nodo no reporta posición (0,0 = sin fix). */
+fun Position?.grados(): Pair<Double, Double>? {
+    val lat = this?.latitude_i ?: return null
+    val lon = longitude_i ?: return null
+    if (lat == 0 && lon == 0) return null
+    return lat * 1e-7 to lon * 1e-7
+}
+
+/**
+ * El firmware recorta la posición según el canal (p. ej. ±3 km en LongFast público). Solo 32 bits es exacta;
+ * 0 = desconocida (la base de nodos del firmware no la guarda), así que también se trata como aproximada.
+ */
+fun Position.esAproximada(): Boolean = precision_bits != 32
+
+/** Distancia en metros (haversine). */
+fun distancia(
+    a: Pair<Double, Double>,
+    b: Pair<Double, Double>,
+): Double {
+    val r = 6_371_000.0
+    val dLat = Math.toRadians(b.first - a.first)
+    val dLon = Math.toRadians(b.second - a.second)
+    val h = sin(dLat / 2).pow(2) + cos(Math.toRadians(a.first)) * cos(Math.toRadians(b.first)) * sin(dLon / 2).pow(2)
+    return 2 * r * asin(sqrt(h))
+}
+
+/** Rumbo inicial de a hacia b, 0–360° (0 = norte). */
+fun rumbo(
+    a: Pair<Double, Double>,
+    b: Pair<Double, Double>,
+): Double {
+    val la = Math.toRadians(a.first)
+    val lb = Math.toRadians(b.first)
+    val dLon = Math.toRadians(b.second - a.second)
+    val y = sin(dLon) * cos(lb)
+    val x = cos(la) * sin(lb) - sin(la) * cos(lb) * cos(dLon)
+    return (Math.toDegrees(atan2(y, x)) + 360) % 360
+}
+
+fun puntoCardinal(grados: Double): String = listOf("N", "NE", "E", "SE", "S", "SO", "O", "NO")[((grados + 22.5) / 45).toInt() % 8]
+
+fun textoDistancia(m: Double): String = if (m < 1000) "${m.toInt()} m" else "%.1f km".format(m / 1000)
 
 /** Id de nodo en el formato que muestra Meshtastic: !8fccfdc0 */
 fun idNodo(num: Int): String = "!%08x".format(num)

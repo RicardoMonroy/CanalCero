@@ -29,9 +29,12 @@ import okio.ByteString.Companion.encodeUtf8
 import org.meshtastic.proto.Data
 import org.meshtastic.proto.FromRadio
 import org.meshtastic.proto.MeshPacket
+import org.meshtastic.proto.NodeInfo
 import org.meshtastic.proto.PortNum
+import org.meshtastic.proto.Position
 import org.meshtastic.proto.ToRadio
 import java.util.UUID
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 /**
@@ -110,6 +113,37 @@ class MeshBle(
                 _state.update { st -> st.copy(mensajes = st.mensajes.map { x -> if (x.id == id) x.copy(entrega = Entrega.FALLO) else x }) }
             }
         }
+    }
+
+    /**
+     * Da al nodo la ubicación del teléfono (el Heltec V3 no tiene GPS). Va solo al nodo local (to = miNodo):
+     * el firmware la retransmite según su intervalo y recortada a la precisión de cada canal.
+     */
+    fun enviarPosicion(
+        lat: Double,
+        lon: Double,
+        alt: Int?,
+    ) {
+        val g = gatt ?: return
+        val st = _state.value
+        val yo = st.miNodo ?: return
+        if (st.estado != Estado.LISTO) return
+        val p =
+            Position(
+                latitude_i = (lat * 1e7).roundToInt(),
+                longitude_i = (lon * 1e7).roundToInt(),
+                altitude = alt,
+                time = (System.currentTimeMillis() / 1000).toInt(),
+                location_source = Position.LocSource.LOC_EXTERNAL,
+            )
+        _state.update { it.copy(nodos = it.nodos + (yo to (it.nodos[yo] ?: NodeInfo(num = yo)).copy(position = p))) }
+        val paquete =
+            MeshPacket(
+                to = yo,
+                id = Random.nextInt(1, Int.MAX_VALUE),
+                decoded = Data(portnum = PortNum.POSITION_APP, payload = p.encodeByteString()),
+            )
+        scope.launch { runCatching { enviar(g, ToRadio(packet = paquete)) }.onFailure { Log.w(TAG, "posición no enviada", it) } }
     }
 
     fun desconectar() {

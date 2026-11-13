@@ -73,6 +73,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
+    implementation(libs.maplibre)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(libs.junit)
