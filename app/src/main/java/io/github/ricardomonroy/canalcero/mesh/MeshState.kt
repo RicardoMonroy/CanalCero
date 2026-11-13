@@ -23,6 +23,7 @@ enum class Estado { DESCONECTADO, CONECTANDO, EMPAREJANDO, DESCARGANDO, LISTO, R
 const val BROADCAST: Int = -1
 
 const val TEXTO_UBICACION_RECIBIDA = "📍 Te compartió su ubicación (míralo en el mapa)"
+const val AVISO_UBICACION_MS = 15 * 60_000L
 const val TEXTO_UBICACION_ENVIADA = "📍 Le enviaste tu ubicación exacta"
 
 /** Payload máximo de texto que acepta la app oficial. */
@@ -173,7 +174,9 @@ private fun MeshState.recibir(
         PortNum.POSITION_APP -> {
             Position.ADAPTER.decode(d.payload).takeIf { it.latitude_i != null }?.let { nodo = nodo.copy(position = it) }
             // Posición mandada solo a nosotros (botón "Enviar mi ubicación" de un chat directo).
-            if (p.to == miNodo && p.from != miNodo) {
+            // En vivo llega cada minuto: un aviso en el chat cada 15 min como máximo.
+            val reciente = mensajes.any { it.de == p.from && it.texto == TEXTO_UBICACION_RECIBIDA && ahora - it.hora < AVISO_UBICACION_MS }
+            if (p.to == miNodo && p.from != miNodo && !reciente) {
                 st = st.copy(mensajes = mensajes + Mensaje(p.id, p.from, p.to, p.channel, TEXTO_UBICACION_RECIBIDA, ahora, Entrega.RECIBIDO))
             }
         }
@@ -248,6 +251,16 @@ fun Chat.clave(): String =
         is Chat.Directo -> "d$nodo"
     }
 
+/** Inverso de [clave]. */
+fun chatDeClave(k: String): Chat? {
+    val n = k.drop(1).toIntOrNull() ?: return null
+    return when (k.firstOrNull()) {
+        'c' -> Chat.Canal(n)
+        'd' -> Chat.Directo(n)
+        else -> null
+    }
+}
+
 /** Mensajes recibidos después de la última vez que se abrió cada conversación. [leidos]: clave → hora en ms. */
 fun MeshState.noLeidos(leidos: Map<String, Long>): Map<Chat, Int> =
     mensajes
@@ -278,3 +291,6 @@ fun nivelRssi(rssi: Int): Int =
         rssi >= -90 -> 1
         else -> 0
     }
+
+/** ¿El canal público está enviando nuestra ubicación (aproximada) a cualquiera cerca? */
+fun MeshState.ubicacionPublica(): Boolean = (canales[0]?.settings?.module_settings?.position_precision ?: 0) != 0

@@ -1,6 +1,15 @@
 package io.github.ricardomonroy.canalcero.ui
 
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.graphics.Color
+import io.github.ricardomonroy.canalcero.mesh.TipoEmergencia
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -40,11 +49,14 @@ fun Chats(
     val chats =
         (ultimos.keys.sortedByDescending { ultimos[it]!!.hora } + st.canales.keys.sorted().map { Chat.Canal(it) }).distinct()
 
+    var sos by remember { mutableStateOf(false) }
+    if (sos) DestinoSos(st, malla) { sos = false }
     if (chats.isEmpty()) {
         Vacio(R.drawable.ic_chat, "Aún no hay conversaciones", "Cuando tu nodo termine de conectarse verás aquí sus canales. Para escribirle a alguien, tócalo en Nodos.")
         return
     }
-    LazyColumn {
+    Box(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize()) {
         items(chats, key = { it.toString() }) { c ->
             val ultimo = ultimos[c]
             val n = pendientes[c] ?: 0
@@ -80,4 +92,45 @@ fun Chats(
             }
         }
     }
+    ExtendedFloatingActionButton(
+        onClick = { sos = true },
+        containerColor = RojoSos,
+        contentColor = Color.White,
+        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+    ) { Text("🆘  SOS") }
+    }
+}
+
+/** SOS desde la lista: elegir a quién (privado por defecto; el público llega a cualquiera cerca que pueda ayudar). */
+@Composable
+private fun DestinoSos(
+    st: MeshState,
+    malla: Malla,
+    cerrar: () -> Unit,
+) {
+    val opciones = st.canales.keys.sortedWith(compareBy { if (it == 0) 99 else it }).map { Chat.Canal(it) }
+    var elegido by remember { mutableStateOf(opciones.firstOrNull()) }
+    AlertDialog(
+        onDismissRequest = cerrar,
+        icon = { Text("🆘", style = MaterialTheme.typography.headlineMedium) },
+        title = { Text("¿Enviar SOS?") },
+        text = {
+            Column {
+                Text("Suena como alarma a quien lo reciba y tu ubicación exacta se comparte en vivo 1 hora.")
+                opciones.forEach { c ->
+                    Row(Modifier.fillMaxWidth().selectable(selected = elegido == c, onClick = { elegido = c }).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = elegido == c, onClick = null)
+                        Text("  " + st.nombre(c) + if (c.indice == 0) " (público: cualquiera cerca)" else "")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                elegido?.let { malla.emergencia(it, TipoEmergencia.SOS) }
+                cerrar()
+            }, enabled = elegido != null) { Text("Enviar SOS", color = RojoSos) }
+        },
+        dismissButton = { TextButton(onClick = cerrar) { Text("Cancelar") } },
+    )
 }

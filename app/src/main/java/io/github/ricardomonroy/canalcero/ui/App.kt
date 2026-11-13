@@ -47,6 +47,9 @@ import io.github.ricardomonroy.canalcero.MeshViewModel
 import io.github.ricardomonroy.canalcero.R
 import io.github.ricardomonroy.canalcero.mesh.Chat
 import io.github.ricardomonroy.canalcero.mesh.Estado
+import io.github.ricardomonroy.canalcero.mesh.alertasRecibidas
+import io.github.ricardomonroy.canalcero.mesh.chatDeClave
+import io.github.ricardomonroy.canalcero.mesh.tipoEmergencia
 import io.github.ricardomonroy.canalcero.mesh.MeshState
 import io.github.ricardomonroy.canalcero.mesh.idNodo
 import io.github.ricardomonroy.canalcero.mesh.noLeidos
@@ -163,7 +166,9 @@ private fun Principal(
         },
     ) { margen ->
         Column(Modifier.padding(margen).fillMaxSize()) {
+            AlertasSos(st, verEnMapa)
             AvisoConexion(st)
+            if (abierto == null) AvisoEnVivo(st, malla)
             val c = abierto
             val a = ajustes
             when {
@@ -266,6 +271,50 @@ private fun AvisoConexion(st: MeshState) {
     ) {
         Icono(R.drawable.ic_bluetooth_searching, null, tint = MaterialTheme.colorScheme.onSurface)
         Text(texto, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** Aviso rojo fijo mientras alguien tenga un SOS o pedido de ayuda sin un "Estoy bien" posterior. */
+@Composable
+private fun AlertasSos(
+    st: MeshState,
+    verEnMapa: (Int) -> Unit,
+) {
+    st.alertasRecibidas(System.currentTimeMillis()).forEach { m ->
+        Row(
+            Modifier.fillMaxWidth().background(RojoSos).padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "${tipoEmergencia(m.texto)?.prefijo ?: ""} ${st.nombre(m.de)} necesita ayuda · ${horaCorta(m.hora)}",
+                Modifier.weight(1f),
+                color = androidx.compose.ui.graphics.Color.White,
+                style = MaterialTheme.typography.titleSmall,
+            )
+            if (st.nodos[m.de]?.position != null) {
+                TextButton(onClick = { verEnMapa(m.de) }) { Text("Ver en mapa", color = androidx.compose.ui.graphics.Color.White) }
+            }
+        }
+    }
+}
+
+/** Recordatorio visible mientras se comparte la ubicación en vivo con alguien. */
+@Composable
+private fun AvisoEnVivo(
+    st: MeshState,
+    malla: io.github.ricardomonroy.canalcero.Malla,
+) {
+    val ahora = System.currentTimeMillis()
+    val vivas = malla.enVivo.filterValues { it - ahora > 60_000 }
+    if (vivas.isEmpty()) return
+    val nombres = vivas.keys.mapNotNull { chatDeClave(it)?.let(st::nombre) }.joinToString(", ")
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icono(R.drawable.ic_location_on, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        Text("  En vivo con $nombres", Modifier.weight(1f), color = MaterialTheme.colorScheme.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        TextButton(onClick = { malla.detenerEnVivo() }) { Text("Detener") }
     }
 }
 

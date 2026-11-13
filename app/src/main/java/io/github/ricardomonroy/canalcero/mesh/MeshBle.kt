@@ -19,6 +19,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -136,11 +137,10 @@ class MeshBle(
         lat: Double,
         lon: Double,
         alt: Int?,
+        alNodo: Boolean = true,
     ) {
-        val g = gatt ?: return
         val st = _state.value
         val yo = st.miNodo ?: return
-        if (st.estado != Estado.LISTO) return
         val p =
             Position(
                 latitude_i = (lat * 1e7).roundToInt(),
@@ -149,7 +149,10 @@ class MeshBle(
                 time = (System.currentTimeMillis() / 1000).toInt(),
                 location_source = Position.LocSource.LOC_EXTERNAL,
             )
+        // Siempre en el estado local (distancias, mapa); al nodo solo si se comparte con los canales.
         _state.update { it.copy(nodos = it.nodos + (yo to (it.nodos[yo] ?: NodeInfo(num = yo)).copy(position = p))) }
+        val g = gatt ?: return
+        if (!alNodo || st.estado != Estado.LISTO) return
         val paquete =
             MeshPacket(
                 to = yo,
@@ -243,19 +246,32 @@ class MeshBle(
      * Manda la última ubicación del teléfono, exacta, solo a [nodo] (cifrada con su llave pública si el firmware la tiene).
      * Requiere "Compartir mi ubicación" activo para tener una posición.
      */
-    fun enviarPosicionA(nodo: Int) {
-        val g = gatt ?: return
+    /** Devuelve false si todavía no hay posición propia que mandar. */
+    fun enviarPosicionA(
+        destino: Chat,
+        registrar: Boolean = true,
+    ): Boolean {
+        val g = gatt ?: return false
         val st = _state.value
-        val p = st.miNodo?.let { st.nodos[it]?.position } ?: return
+        val p = st.miNodo?.let { st.nodos[it]?.position } ?: return false
         val id = Random.nextInt(1, Int.MAX_VALUE)
         val exacta = p.copy(precision_bits = PRECISION_EXACTA, time = (System.currentTimeMillis() / 1000).toInt())
-        val m = Mensaje(id, st.miNodo, nodo, 0, TEXTO_UBICACION_ENVIADA, System.currentTimeMillis(), Entrega.ENVIANDO)
-        _state.update { it.copy(mensajes = it.mensajes + m) }
+        val (para, canal) =
+            when (destino) {
+                is Chat.Canal -> BROADCAST to destino.indice
+                is Chat.Directo -> destino.nodo to 0
+            }
+        // En vivo se manda cada minuto: solo el primer envío deja huella en el chat.
+        if (registrar) {
+            val m = Mensaje(id, st.miNodo, para, canal, TEXTO_UBICACION_ENVIADA, System.currentTimeMillis(), Entrega.ENVIANDO)
+            _state.update { it.copy(mensajes = it.mensajes + m) }
+        }
         val paquete =
             MeshPacket(
-                to = nodo,
+                to = para,
+                channel = canal,
                 id = id,
-                want_ack = true,
+                want_ack = registrar,
                 decoded = Data(portnum = PortNum.POSITION_APP, payload = exacta.encodeByteString()),
             )
         scope.launch {
@@ -263,7 +279,19 @@ class MeshBle(
                 _state.update { st2 -> st2.copy(mensajes = st2.mensajes.map { x -> if (x.id == id) x.copy(entrega = Entrega.FALLO) else x }) }
             }
         }
+        return true
     }
+
+    /** Pone en 0 la precisión de posición del canal público: la ubicación deja de salir a cualquiera cerca. */
+    suspend fun ocultarUbicacionPublica() {
+        val c = _state.value.canales[0] ?: return
+        val nuevo = primarioSinPosicion(c)
+        administrar(listOf(AdminMessage(set_channel = nuevo)))
+        _state.update { it.conCanal(nuevo) }
+    }
+
+    /** Paquetes recibidos de otros nodos, para el registro de alcance. */
+    val paquetes = MutableSharedFlow<MeshPacket>(extraBufferCapacity = 64)
 
     // --- Explorar la red ---
 
@@ -546,6 +574,7 @@ class MeshBle(
                 val fr = FromRadio.ADAPTER.decode(bytes)
                 capturarPasskey(fr)
                 _state.update { it.aplicar(fr, System.currentTimeMillis()) }
+                fr.packet?.takeIf { it.from != _state.value.miNodo && it.decoded != null }?.let { paquetes.tryEmit(it) }
             }
         }
 }

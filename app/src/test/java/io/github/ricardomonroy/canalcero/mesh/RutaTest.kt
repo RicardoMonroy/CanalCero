@@ -61,4 +61,31 @@ class RutaTest {
         assertTrue(chica in 100..2_000)
         assertTrue(teselas(17.0, -104.0, 23.0, -97.0, 5, 14) > 20_000)
     }
+
+    @Test
+    fun enVivoVenceYRespetaIntervalo() {
+        val ses = mapOf("d2" to 1_000L, "c1" to 5_000L)
+        assertEquals(mapOf("c1" to 5_000L), vigentes(ses, 2_000))
+        assertTrue(tocaEnviar(null, 0))
+        assertEquals(false, tocaEnviar(10_000, 10_000 + INTERVALO_EN_VIVO_MS - 1))
+        assertTrue(tocaEnviar(10_000, 10_000 + INTERVALO_EN_VIVO_MS))
+        listOf(Chat.Canal(3), Chat.Directo(-1890386496)).forEach { assertEquals(it, chatDeClave(it.clave())) }
+        assertEquals(null, chatDeClave("x9"))
+    }
+
+    @Test
+    fun muestraDeAlcanceYCsv() {
+        val p = org.meshtastic.proto.MeshPacket(from = 2, rx_rssi = -97, rx_snr = -6.25f, hop_start = 3, hop_limit = 3)
+        val m = muestra(st, p, 42)
+        assertEquals(0, m.saltos)
+        assertEquals(3000.0, m.distancia!!, 50.0)
+        assertEquals(-97, m.rssi)
+        val relevo = muestra(st, p.copy(hop_limit = 1), 43)
+        assertEquals(2, relevo.saltos)
+        assertEquals(null, muestra(st, p.copy(hop_start = 0), 44).saltos) // firmware viejo
+        assertEquals(3000.0, alcanceDirecto(listOf(m, relevo))!!, 50.0) // el de 2 saltos no cuenta
+        val csv = csvAlcance(listOf(m.copy(nombre = "Moto, \"R1\"")))
+        assertTrue(csv.lines()[1].contains("\"Moto, \"\"R1\"\"\""))
+        assertEquals(8, csv.lines()[0].split(',').size)
+    }
 }

@@ -63,6 +63,7 @@ import io.github.ricardomonroy.canalcero.mesh.PerfilPosicion
 import io.github.ricardomonroy.canalcero.mesh.ROLES
 import io.github.ricardomonroy.canalcero.mesh.Rol
 import io.github.ricardomonroy.canalcero.mesh.paraMexico
+import io.github.ricardomonroy.canalcero.mesh.ubicacionPublica
 import io.github.ricardomonroy.canalcero.mesh.sinRegion
 import io.github.ricardomonroy.canalcero.mesh.canalPrivado
 import io.github.ricardomonroy.canalcero.mesh.leerUrlCanal
@@ -141,6 +142,9 @@ private fun Inicio(
     Seccion("Mi nodo")
     Fila(R.drawable.ic_person, "Nombre, rol y región", listOfNotNull(yo?.long_name, ROLES.firstOrNull { it.rol == st.cfgDispositivo?.role }?.nombre).joinToString(" · ")) { ir(SubAjuste.MI_NODO) }
     Seccion("Privacidad")
+    if (malla.compartirUbicacion && st.ubicacionPublica()) {
+        Fila(R.drawable.ic_error, "Tu ubicación sale en el canal público", "Toca para revisarlo", alerta = true) { ir(SubAjuste.UBICACION) }
+    }
     Fila(R.drawable.ic_location_on, "Ubicación", (if (malla.compartirUbicacion) "Compartiendo" else "No se comparte") + " · perfil $perfil") { ir(SubAjuste.UBICACION) }
     Fila(R.drawable.ic_lock, "Canales", if (privados == 0) "Solo el público" else "$privados privado" + if (privados > 1) "s" else "") { ir(SubAjuste.CANALES) }
     Seccion("App")
@@ -241,8 +245,8 @@ private fun Ubicacion(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("Compartir mi ubicación", style = MaterialTheme.typography.bodyLarge)
-            Text("El teléfono le da tu ubicación al nodo; el nodo la envía con la precisión de cada canal.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Compartir con mis canales", style = MaterialTheme.typography.bodyLarge)
+            Text("Tu nodo la envía con la precisión de cada canal. Para una sola persona o por un rato, usa el botón de ubicación en el chat.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = malla.compartirUbicacion, onCheckedChange = alternar)
     }
@@ -256,6 +260,12 @@ private fun Ubicacion(
                     ejecutar("Posición: perfil ${p.nombre}") { ble.configurar(Config(position = p.aplicar(cfg))) }
                 }
             }
+        }
+    }
+    if (st.ubicacionPublica()) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("El canal público envía tu ubicación aproximada.", Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = { ejecutar("Ubicación oculta en el canal público") { malla.ble.ocultarUbicacionPublica() } }, enabled = !ocupado) { Text("Ocultar") }
         }
     }
     Seccion("Quién la ve")
@@ -361,19 +371,54 @@ private fun Apariencia(malla: Malla) {
     }
 }
 
-/** Activa o desactiva la ubicación pidiendo el permiso si hace falta. */
+/**
+ * Activa o desactiva "compartir con mis canales", pidiendo el permiso si hace falta. Si el canal público está
+ * enviando la ubicación (aproximada, a cualquiera cerca), antes pregunta si se apaga ahí.
+ */
 @Composable
 fun alternadorUbicacion(malla: Malla): (Boolean) -> Unit {
     val ctx = LocalContext.current
+    val alcance = rememberCoroutineScope()
+    var preguntar by remember { mutableStateOf(false) }
     val pedir =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
             if (r[Manifest.permission.ACCESS_FINE_LOCATION] == true) malla.alternarUbicacion(true)
         }
-    return { on ->
-        if (!on || ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            malla.alternarUbicacion(on)
+    val activar = {
+        if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            malla.alternarUbicacion(true)
         } else {
             pedir.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
+    }
+    if (preguntar) {
+        AlertDialog(
+            onDismissRequest = { preguntar = false },
+            icon = { Icono(R.drawable.ic_location_on, null) },
+            title = { Text("Tu ubicación saldría en el canal público") },
+            text = { Text("Tal como está tu nodo, cualquiera con Meshtastic cerca vería tu zona (aproximada, ±km). Te recomiendo compartirla solo en tus canales privados.") },
+            confirmButton = {
+                Button(onClick = {
+                    preguntar = false
+                    alcance.launch {
+                        runCatching { malla.ble.ocultarUbicacionPublica() }
+                        activar()
+                    }
+                }) { Text("Solo en privado") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    preguntar = false
+                    activar()
+                }) { Text("Compartir igual") }
+            },
+        )
+    }
+    return { on ->
+        when {
+            !on -> malla.alternarUbicacion(false)
+            malla.ble.state.value.ubicacionPublica() -> preguntar = true
+            else -> activar()
         }
     }
 }

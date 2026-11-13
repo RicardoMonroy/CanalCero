@@ -36,7 +36,10 @@ App Android para comunicarse por LoRa usando nodos Meshtastic, pensada para cuan
    - **Fuera de alcance:** comunicación manos libres (mensajes rápidos, lectura en voz alta, intercomunicador). Eso vive en otra app (Parvada), no en CanalCero.
    - Compartir ubicación solo con personas o canales elegidos y por tiempo limitado ("1 h", "hasta llegar"): la app manda la posición por directo/canal privado; el nodo no la difunde.
    - Aviso si el canal público tiene precisión ≠ 0 (en ese caso la ubicación sale aproximada a cualquiera en LongFast).
+   - ✅ Implementado (2026-11-13). Falta probar en campo.
 4. **Modo emergencia:** "Estoy bien", pase de lista, SOS, historial persistente.
+   - Viajan como texto normal con emoji inicial (✅ ⚠️ 🆘 📋) para que la app oficial los muestre; CanalCero los colorea, cuenta el pase de lista y suena SOS/ayuda como alarma.
+   - ✅ Implementado (2026-11-13). Falta probar en campo.
 5. (Opcional) Puente MQTT.
 
 ## Hardware

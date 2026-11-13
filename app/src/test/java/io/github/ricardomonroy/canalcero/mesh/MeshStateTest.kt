@@ -171,4 +171,21 @@ class MeshStateTest {
         assertEquals(240L, esperaRestante(1_000_000, 1_060_000))
         assertEquals(0L, esperaRestante(1_000_000, 1_000_000 + ESPERA_BUSQUEDA_SEG * 1000 + 1))
     }
+
+    @Test
+    fun ubicacionEnVivoNoLlenaElChat() {
+        val pos = Position(latitude_i = 205_888_000, longitude_i = -1_003_899_000, precision_bits = 32)
+        var st = MeshState(miNodo = yo)
+        (0..20).forEach { minuto -> st = st.aplicar(paquete(otro, yo, Data(portnum = PortNum.POSITION_APP, payload = pos.encodeByteString())), minuto * 60_000L) }
+        // 21 minutos de envíos cada minuto: un aviso al inicio y otro al pasar 15 min.
+        assertEquals(2, st.mensajes.count { it.texto == TEXTO_UBICACION_RECIBIDA })
+    }
+
+    @Test
+    fun detectaUbicacionEnCanalPublico() {
+        fun canal0(prec: Int) = org.meshtastic.proto.Channel(index = 0, settings = org.meshtastic.proto.ChannelSettings(module_settings = org.meshtastic.proto.ModuleSettings(position_precision = prec)))
+        assertEquals(true, MeshState(canales = mapOf(0 to canal0(13))).ubicacionPublica())
+        assertEquals(false, MeshState(canales = mapOf(0 to canal0(0))).ubicacionPublica())
+        assertEquals(false, MeshState().ubicacionPublica())
+    }
 }

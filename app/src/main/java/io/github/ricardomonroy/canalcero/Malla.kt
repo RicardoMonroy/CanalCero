@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationCompat
@@ -25,6 +26,14 @@ import androidx.core.content.edit
 import androidx.core.util.AtomicFile
 import io.github.ricardomonroy.canalcero.mesh.Alerta
 import io.github.ricardomonroy.canalcero.mesh.Chat
+import io.github.ricardomonroy.canalcero.mesh.Muestra
+import io.github.ricardomonroy.canalcero.mesh.TipoEmergencia
+import io.github.ricardomonroy.canalcero.mesh.tipoEmergencia
+import io.github.ricardomonroy.canalcero.mesh.urgente
+import io.github.ricardomonroy.canalcero.mesh.chatDeClave
+import io.github.ricardomonroy.canalcero.mesh.muestra
+import io.github.ricardomonroy.canalcero.mesh.tocaEnviar
+import io.github.ricardomonroy.canalcero.mesh.vigentes
 import io.github.ricardomonroy.canalcero.mesh.clave
 import io.github.ricardomonroy.canalcero.ui.TemaApp
 import io.github.ricardomonroy.canalcero.mesh.Entrega
@@ -162,7 +171,9 @@ class Malla(
     fun desconectar() {
         prefs.edit { remove("ultimo_nodo") }
         ble.desconectar()
-        detenerUbicacion()
+        compartirUbicacion = false
+        guardarEnVivo(emptyMap())
+        actualizarEscucha()
         MeshService.detener(app)
     }
 
@@ -170,29 +181,128 @@ class Malla(
 
     private val lm get() = app.getSystemService(LocationManager::class.java)
 
-    private val escuchaUbicacion =
-        LocationListener { l -> ble.enviarPosicion(l.latitude, l.longitude, if (l.hasAltitude()) l.altitude.toInt() else null) }
+    private var escuchando = false
+    private val ultimoEnvio = mutableMapOf<String, Long>()
 
-    /** La UI pide ACCESS_FINE_LOCATION antes de activar. */
+    /** El servicio pide el tipo "location" mientras se escucha el GPS. */
+    val usaUbicacion get() = escuchando
+
+    private val escuchaUbicacion =
+        LocationListener { l ->
+            // Al nodo solo si se comparte con los canales; el estado local siempre (distancias, en vivo).
+            ble.enviarPosicion(l.latitude, l.longitude, if (l.hasAltitude()) l.altitude.toInt() else null, alNodo = compartirUbicacion)
+            enviarEnVivo()
+        }
+
+    /** "Compartir con mis canales": el nodo difunde la ubicación según la precisión de cada canal. */
     fun alternarUbicacion(activar: Boolean) {
         prefs.edit { putBoolean("compartir_ubicacion", activar) }
-        detenerUbicacion()
-        if (activar && tiene(Manifest.permission.ACCESS_FINE_LOCATION)) {
-            compartirUbicacion = true
+        compartirUbicacion = activar && tiene(Manifest.permission.ACCESS_FINE_LOCATION)
+        actualizarEscucha()
+    }
+
+    /** Destinos con ubicación en vivo: clave de Chat → hasta (ms). */
+    var enVivo by mutableStateOf(prefs.getStringSet("en_vivo", emptySet())!!.mapNotNull { e -> e.split('=').takeIf { it.size == 2 }?.let { it[0] to (it[1].toLongOrNull() ?: 0L) } }.toMap())
+        private set
+
+    private fun guardarEnVivo(m: Map<String, Long>) {
+        enVivo = m
+        prefs.edit { putStringSet("en_vivo", m.map { (k, v) -> "$k=$v" }.toSet()) }
+    }
+
+    /** Ubicación exacta solo a [c], cada minuto, durante [minutos] (0 = una sola vez); null la detiene. */
+    fun compartirEnVivo(
+        c: Chat,
+        minutos: Int?,
+    ) {
+        val k = c.clave()
+        ultimoEnvio.remove(k)
+        // 0 = "enviar ahora": una ventana de 30 s alcanza para un solo envío (el intervalo es 60 s).
+        val ms = if (minutos == 0) 30_000L else (minutos ?: 0) * 60_000L
+        guardarEnVivo(if (minutos == null) enVivo - k else enVivo + (k to System.currentTimeMillis() + ms))
+        actualizarEscucha()
+        enviarEnVivo()
+    }
+
+    fun detenerEnVivo() {
+        guardarEnVivo(emptyMap())
+        actualizarEscucha()
+    }
+
+    private fun enviarEnVivo() {
+        val ahora = System.currentTimeMillis()
+        val vivas = vigentes(enVivo, ahora)
+        if (vivas != enVivo) {
+            guardarEnVivo(vivas)
+            actualizarEscucha()
+        }
+        vivas.keys.forEach { k ->
+            val previo = ultimoEnvio[k]
+            val c = chatDeClave(k) ?: return@forEach
+            // Si aún no hay posición del GPS no se marca como enviado: se reintenta en la siguiente vuelta.
+            if (tocaEnviar(previo, ahora) && ble.enviarPosicionA(c, registrar = previo == null)) ultimoEnvio[k] = ahora
+        }
+    }
+
+    /** Enciende o apaga el GPS según lo que se esté compartiendo. */
+    private fun actualizarEscucha() {
+        val necesita = (compartirUbicacion || enVivo.isNotEmpty()) && tiene(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (necesita && !escuchando) {
+            escuchando = true
             val proveedor =
                 if (Build.VERSION.SDK_INT >= 31 && lm.hasProvider(LocationManager.FUSED_PROVIDER)) LocationManager.FUSED_PROVIDER else LocationManager.GPS_PROVIDER
-            lm.getLastKnownLocation(proveedor)?.let(escuchaUbicacion::onLocationChanged)
             // Cada 30 s o 25 m como mínimo: más seguido saturaría el canal LoRa.
             lm.requestLocationUpdates(proveedor, 30_000L, 25f, escuchaUbicacion, Looper.getMainLooper())
+            lm.getLastKnownLocation(proveedor)?.let(escuchaUbicacion::onLocationChanged)
+        } else if (!necesita && escuchando) {
+            escuchando = false
+            lm.removeUpdates(escuchaUbicacion)
         }
         // El servicio necesita el tipo "location" para seguir recibiendo ubicación con la pantalla apagada.
         if (ble.dispositivo != null) MeshService.actualizar(app)
     }
 
-    private fun detenerUbicacion() {
-        compartirUbicacion = false
-        lm.removeUpdates(escuchaUbicacion)
+    // --- Emergencia ---
+
+    /**
+     * Manda un mensaje de emergencia a [c]. Estoy bien y Necesito ayuda llevan la ubicación exacta una vez;
+     * SOS la deja en vivo 1 hora para que puedan encontrarte.
+     */
+    fun emergencia(
+        c: Chat,
+        tipo: TipoEmergencia,
+    ) {
+        ble.enviarTexto(tipo.texto, c)
+        when (tipo) {
+            TipoEmergencia.BIEN, TipoEmergencia.AYUDA -> compartirEnVivo(c, 0)
+            TipoEmergencia.SOS -> compartirEnVivo(c, 60)
+            TipoEmergencia.PASE_DE_LISTA -> Unit
+        }
     }
+
+    // --- Prueba de alcance ---
+
+    var alcanceActivo by mutableStateOf(false)
+        private set
+    val muestras = mutableStateListOf<Muestra>()
+
+    fun alternarAlcance(activar: Boolean) {
+        if (activar) muestras.clear()
+        alcanceActivo = activar
+    }
+
+    private fun registrarAlcance() =
+        scope.launch {
+            ble.paquetes.collect { p -> if (alcanceActivo) muestras += muestra(ble.state.value, p, System.currentTimeMillis()) }
+        }
+
+    private fun latidoEnVivo() =
+        scope.launch {
+            while (true) {
+                delay(15_000)
+                if (enVivo.isNotEmpty()) enviarEnVivo()
+            }
+        }
 
     // --- Historial ---
 
@@ -227,11 +337,16 @@ class Malla(
             ble.state.collect { st ->
                 val nuevos = st.mensajes.drop(vistos).filter { it.entrega == Entrega.RECIBIDO }
                 vistos = st.mensajes.size
-                if (visible || !tiene(Manifest.permission.POST_NOTIFICATIONS)) return@collect
+                if (!tiene(Manifest.permission.POST_NOTIFICATIONS)) return@collect
                 nuevos.forEach { m ->
+                    // SOS y ayuda suenan aunque la app esté abierta; lo demás solo con la app en segundo plano.
+                    val urgente = tipoEmergencia(m.texto)?.urgente() == true
+                    if (visible && !urgente) return@forEach
                     val n =
                         NotificationCompat
-                            .Builder(app, CANAL_MENSAJES)
+                            .Builder(app, if (urgente) CANAL_SOS else CANAL_MENSAJES)
+                            .setPriority(if (urgente) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
+                            .setCategory(if (urgente) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_MESSAGE)
                             .setSmallIcon(R.drawable.ic_notificacion)
                             .setContentTitle("${st.nombre(m.de)} · ${st.nombre(m.chat(st.miNodo))}")
                             .setContentText(m.texto)
@@ -248,6 +363,13 @@ class Malla(
         val nm = app.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CANAL_SERVICIO, "Conexión con el nodo", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CANAL_MENSAJES, "Mensajes", NotificationManager.IMPORTANCE_HIGH))
+        nm.createNotificationChannel(
+            NotificationChannel(CANAL_SOS, "SOS y pedidos de ayuda", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Alertas de emergencia de tu familia o grupo"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 600, 300, 600, 300, 600)
+            },
+        )
     }
 
     /** Si la app se cerró con un nodo conectado, al volver a abrirla se reconecta sola. */
@@ -272,12 +394,16 @@ class Malla(
         vigilarGrupo()
         guardarHistorialAlCambiar()
         avisarMensajesNuevos()
+        registrarAlcance()
+        latidoEnVivo()
         reconectarUltimoNodo()
+        actualizarEscucha() // reanuda sesiones en vivo guardadas
     }
 
     companion object {
         const val CANAL_SERVICIO = "servicio"
         const val CANAL_MENSAJES = "mensajes"
+        const val CANAL_SOS = "sos"
         private const val ID_ALERTA = 1_000_000
 
         fun abrirApp(ctx: Context): PendingIntent =

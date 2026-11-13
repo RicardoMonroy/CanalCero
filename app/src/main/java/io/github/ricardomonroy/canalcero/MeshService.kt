@@ -74,7 +74,7 @@ class MeshService : Service() {
     // "location" solo si hay permiso y se comparte; pedirlo sin permiso hace que Android rechace el servicio.
     private fun tipos(m: Malla): Int {
         var t = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
-        if (Build.VERSION.SDK_INT >= 29 && m.compartirUbicacion) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        if (Build.VERSION.SDK_INT >= 29 && m.usaUbicacion) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         return t
     }
 

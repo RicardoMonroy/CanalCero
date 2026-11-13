@@ -91,3 +91,68 @@ fun teselas(
         }
         (x(este) - x(oeste) + 1) * (y(sur) - y(norte) + 1)
     }
+
+// --- Ubicación en vivo ---
+
+/** Cada cuánto se reenvía la ubicación en vivo a cada destino. */
+const val INTERVALO_EN_VIVO_MS = 60_000L
+
+/** Quita las sesiones en vivo vencidas. [sesiones]: clave de Chat → hasta (ms). */
+fun vigentes(
+    sesiones: Map<String, Long>,
+    ahora: Long,
+): Map<String, Long> = sesiones.filterValues { it > ahora }
+
+/** ¿Toca reenviar a este destino? [ultimo] = último envío (ms) o null si nunca. */
+fun tocaEnviar(
+    ultimo: Long?,
+    ahora: Long,
+): Boolean = ultimo == null || ahora - ultimo >= INTERVALO_EN_VIVO_MS
+
+// --- Prueba de alcance ---
+
+/** Un paquete recibido durante la prueba: con qué señal llegó, por cuántos saltos y desde qué distancia. */
+data class Muestra(
+    val hora: Long,
+    val nodo: Int,
+    val nombre: String,
+    val rssi: Int,
+    val snr: Float,
+    val saltos: Int?,
+    val distancia: Double?,
+    val aproximada: Boolean,
+)
+
+fun muestra(
+    st: MeshState,
+    p: org.meshtastic.proto.MeshPacket,
+    ahora: Long,
+): Muestra {
+    val yo = st.miNodo?.let { st.nodos[it]?.position.grados() }
+    val otro = st.nodos[p.from]?.position
+    val donde = otro.grados()
+    return Muestra(
+        hora = ahora,
+        nodo = p.from,
+        nombre = st.nombre(p.from),
+        rssi = p.rx_rssi,
+        snr = p.rx_snr,
+        // hop_start = saltos permitidos al salir; hop_limit = los que le quedan al llegar. Firmware viejo no manda hop_start.
+        saltos = if (p.hop_start > 0) p.hop_start - p.hop_limit else null,
+        distancia = if (yo != null && donde != null) distancia(yo, donde) else null,
+        aproximada = otro?.esAproximada() ?: false,
+    )
+}
+
+/** Mayor distancia confiable (posición exacta) a la que llegó un paquete sin repetidor. */
+fun alcanceDirecto(ms: List<Muestra>): Double? = ms.filter { it.saltos == 0 && !it.aproximada }.mapNotNull { it.distancia }.maxOrNull()
+
+fun csvAlcance(ms: List<Muestra>): String =
+    buildString {
+        appendLine("hora_ms,nodo,nombre,rssi_dbm,snr_db,saltos,distancia_m,aproximada")
+        ms.forEach {
+            // Nombres con comas o comillas: se encierran en comillas dobles (RFC 4180).
+            val nombre = "\"" + it.nombre.replace("\"", "\"\"") + "\""
+            appendLine(listOf(it.hora, idNodo(it.nodo), nombre, it.rssi, it.snr, it.saltos ?: "", it.distancia?.toInt() ?: "", it.aproximada).joinToString(","))
+        }
+    }
