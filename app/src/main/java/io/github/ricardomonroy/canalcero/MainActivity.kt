@@ -60,6 +60,7 @@ import io.github.ricardomonroy.canalcero.mesh.textoDistancia
 import io.github.ricardomonroy.canalcero.ui.Ajustes
 import io.github.ricardomonroy.canalcero.ui.Mapa
 import io.github.ricardomonroy.canalcero.ui.OpcionesChat
+import io.github.ricardomonroy.canalcero.ui.Ruta
 import io.github.ricardomonroy.canalcero.ui.CanalCeroTheme
 import org.meshtastic.proto.NodeInfo
 
@@ -179,9 +180,14 @@ private fun Conectado(
 
     TabRow(selectedTabIndex = pestana) {
         Tab(pestana == 0, { pestana = 0 }, text = { Text("Chats") })
-        Tab(pestana == 1, { pestana = 1 }, text = { Text("Nodos (${st.nodos.size})") })
+        Tab(pestana == 1, { pestana = 1 }, text = { Text("Nodos") })
         Tab(pestana == 2, { pestana = 2 }, text = { Text("Mapa") })
+        Tab(pestana == 4, { pestana = 4 }, text = { Text("Ruta") })
         Tab(pestana == 3, { pestana = 3 }, text = { Text("Ajustes") })
+    }
+    if (pestana == 4) {
+        Ruta(st, vm.malla)
+        return
     }
     if (pestana == 3) {
         Ajustes(st, vm.ble)

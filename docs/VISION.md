@@ -21,8 +21,6 @@ App Android para comunicarse por LoRa usando nodos Meshtastic, pensada para cuan
 - Nodo por moto con GPS propio, alimentado de 12 V con buck a USB.
 - Mapas offline descargados antes de salir.
 - Mapa del grupo: distancia, rumbo, "visto hace X min", alerta si alguien se queda atrás.
-- Mensajes rápidos de un toque (Paro, Gasolina, Falla mecánica, Accidente).
-- Lectura en voz alta (TTS) por el intercomunicador del casco.
 - Intervalo de posición ~30–60 s en movimiento para no saturar el canal.
 
 ## Hoja de ruta
@@ -34,7 +32,8 @@ App Android para comunicarse por LoRa usando nodos Meshtastic, pensada para cuan
    - Intervalo de transmisión de posición (más corto para modo moto).
    - Ubicación exacta por mensaje directo. Probado (2026-11-13, firmware 2.7.15): el firmware **no** recorta la posición que manda el teléfono.
    - ✅ Fase 2 completa y probada entre S23 y Pixel 10.
-3. **Modo ruta** (moto, viaje, salidas fuera de la zona habitual): mapas offline, distancia/rumbo, mensajes rápidos, TTS, prueba de alcance (registro RSSI/SNR + distancia).
+3. **Modo ruta** (moto, viaje, salidas fuera de la zona habitual): mapas offline de la zona que elija el usuario, distancia/rumbo a cada compañero, alerta si alguien se queda atrás o pierde señal, prueba de alcance (registro RSSI/SNR + distancia).
+   - **Fuera de alcance:** comunicación manos libres (mensajes rápidos, lectura en voz alta, intercomunicador). Eso vive en otra app (Parvada), no en CanalCero.
    - Compartir ubicación solo con personas o canales elegidos y por tiempo limitado ("1 h", "hasta llegar"): la app manda la posición por directo/canal privado; el nodo no la difunde.
    - Aviso si el canal público tiene precisión ≠ 0 (en ese caso la ubicación sale aproximada a cualquiera en LongFast).
 4. **Modo emergencia:** "Estoy bien", pase de lista, SOS, historial persistente.

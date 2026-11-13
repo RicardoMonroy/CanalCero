@@ -1,5 +1,20 @@
 package io.github.ricardomonroy.canalcero.ui
 
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -13,6 +28,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import io.github.ricardomonroy.canalcero.malla
 import io.github.ricardomonroy.canalcero.mesh.MeshState
 import io.github.ricardomonroy.canalcero.mesh.esAproximada
 import io.github.ricardomonroy.canalcero.mesh.grados
@@ -25,7 +41,15 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression.get
 import org.maplibre.android.style.expressions.Expression.toColor
+import org.maplibre.android.offline.OfflineTilePyramidRegionDefinition
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory.fillColor
+import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
+import org.maplibre.android.style.layers.PropertyFactory.lineColor
+import org.maplibre.android.style.layers.PropertyFactory.lineDasharray
+import org.maplibre.android.style.layers.PropertyFactory.lineWidth
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
@@ -42,9 +66,12 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.Point
+import org.maplibre.geojson.Polygon
 
-// OpenFreeMap: sin API key, con atribución OSM incluida en el estilo.
-private const val ESTILO = "https://tiles.openfreemap.org/styles/dark"
+// OpenFreeMap: sin API key, con atribución OSM incluida en el estilo. Ambos comparten teselas e íconos.
+const val ESTILO_CLARO = "https://tiles.openfreemap.org/styles/liberty"
+const val ESTILO_OSCURO = "https://tiles.openfreemap.org/styles/dark"
+val ESTILOS = listOf(ESTILO_CLARO, ESTILO_OSCURO)
 private val QUERETARO = LatLng(20.5888, -100.3899)
 
 @Composable
@@ -84,49 +111,72 @@ fun Mapa(
         }
     }
 
-    AndroidView(
-        modifier = modifier,
-        factory = {
-            vista.apply {
-                getMapAsync { m ->
-                    // Nodos a pocos metros encuadran a zoom ~22: sin calles en pantalla, el mapa se ve negro.
-                    m.setMaxZoomPreference(17.0)
-                    m.cameraPosition =
-                        org.maplibre.android.camera.CameraPosition
-                            .Builder()
-                            .target(QUERETARO)
-                            .zoom(10.0)
-                            .build()
-                    m.setStyle(Style.Builder().fromUri(ESTILO)) { s ->
-                        s.addSource(GeoJsonSource("nodos"))
-                        s.addLayer(
-                            CircleLayer("nodos-punto", "nodos").withProperties(
-                                circleRadius(8f),
-                                circleColor(toColor(get("color"))),
-                                circleStrokeWidth(2f),
-                                circleStrokeColor("#1C1F23"),
-                            ),
-                        )
-                        s.addLayer(
-                            SymbolLayer("nodos-nombre", "nodos").withProperties(
-                                textField(get("nombre")),
-                                // La única fuente que sirve el estilo; con la default (Open Sans) las etiquetas dan 404.
-                                textFont(arrayOf("Noto Sans Regular")),
-                                textSize(13f),
-                                textOffset(arrayOf(0f, 1.4f)),
-                                textColor("#F4EFE6"),
-                                textHaloColor("#1C1F23"),
-                                textHaloWidth(1.5f),
-                            ),
-                        )
-                        estilo = s
+    val malla = ctx.malla
+    val claro = malla.estiloClaro
+    // Al cambiar de estilo MapLibre descarta capas y fuentes: se vuelven a crear.
+    LaunchedEffect(claro) {
+        estilo = null
+        vista.getMapAsync { m -> m.setStyle(Style.Builder().fromUri(if (claro) ESTILO_CLARO else ESTILO_OSCURO)) { s -> estilo = prepararEstilo(s, claro) } }
+    }
+
+    var pidiendo by remember { mutableStateOf<LatLngBounds?>(null) }
+    Box(modifier) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = {
+                vista.apply {
+                    getMapAsync { m ->
+                        // Nodos a pocos metros encuadran a zoom ~22: sin calles en pantalla, el mapa se ve negro.
+                        m.setMaxZoomPreference(17.0)
+                        m.cameraPosition =
+                            org.maplibre.android.camera.CameraPosition
+                                .Builder()
+                                .target(QUERETARO)
+                                .zoom(10.0)
+                                .build()
                     }
                 }
+            },
+        )
+        // Abajo a la derecha: arriba está la brújula y abajo a la izquierda la atribución.
+        Column(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalAlignment = Alignment.End) {
+            ZonasOffline.progreso?.let {
+                Text(it, Modifier.background(Color(0xCC1C1F23)).padding(6.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFFF4EFE6))
             }
-        },
-    )
+            SmallFloatingActionButton(containerColor = MaterialTheme.colorScheme.primary, onClick = { malla.alternarEstilo() }) {
+                Text(if (claro) "🌙" else "☀", style = MaterialTheme.typography.titleMedium)
+            }
+            if (ZonasOffline.progreso == null) {
+                SmallFloatingActionButton(containerColor = MaterialTheme.colorScheme.primary, onClick = { vista.getMapAsync { m -> pidiendo = m.projection.visibleRegion.latLngBounds } }) {
+                    Text("⤓", style = MaterialTheme.typography.titleLarge)
+                }
+            }
+        }
+    }
+    pidiendo?.let { b -> DialogoDescarga(b) { pidiendo = null } }
 
-    LaunchedEffect(st.nodos, estilo) {
+    // Se redibujan al cambiar de estilo o al terminar una descarga.
+    LaunchedEffect(estilo, ZonasOffline.progreso == null) {
+        val s = estilo ?: return@LaunchedEffect
+        ZonasOffline.listar(ctx) { zonas ->
+            val f =
+                zonas.mapNotNull { z ->
+                    val b = (z.regiones.first().definition as? OfflineTilePyramidRegionDefinition)?.bounds ?: return@mapNotNull null
+                    val anillo =
+                        listOf(
+                            Point.fromLngLat(b.longitudeWest, b.latitudeSouth),
+                            Point.fromLngLat(b.longitudeEast, b.latitudeSouth),
+                            Point.fromLngLat(b.longitudeEast, b.latitudeNorth),
+                            Point.fromLngLat(b.longitudeWest, b.latitudeNorth),
+                            Point.fromLngLat(b.longitudeWest, b.latitudeSouth),
+                        )
+                    Feature.fromGeometry(Polygon.fromLngLats(listOf(anillo))).apply { addStringProperty("nombre", z.nombre) }
+                }
+            s.getSourceAs<GeoJsonSource>("zonas")?.setGeoJson(FeatureCollection.fromFeatures(f))
+        }
+    }
+
+    LaunchedEffect(st.nodos, estilo, claro) {
         val s = estilo ?: return@LaunchedEffect
         val puntos =
             st.nodos.values.mapNotNull { n ->
@@ -138,7 +188,7 @@ fun Mapa(
                 LatLng(lat, lon) to
                     Feature.fromGeometry(Point.fromLngLat(lon, lat)).apply {
                         addStringProperty("nombre", etiqueta)
-                        addStringProperty("color", if (mio) "#F26B1D" else "#F4EFE6")
+                        addStringProperty("color", if (mio) "#F26B1D" else if (claro) "#1C1F23" else "#F4EFE6")
                     }
             }
         s.getSourceAs<GeoJsonSource>("nodos")?.setGeoJson(FeatureCollection.fromFeatures(puntos.map { it.second }))
@@ -154,4 +204,86 @@ fun Mapa(
             m.animateCamera(camara)
         }
     }
+}
+
+
+@Composable
+private fun DialogoDescarga(
+    b: LatLngBounds,
+    cerrar: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val n = ZonasOffline.estimar(b)
+    var nombre by remember { mutableStateOf("") }
+    val cabe = n <= ZonasOffline.MAX_TESELAS
+    AlertDialog(
+        onDismissRequest = cerrar,
+        title = { Text("Descargar esta zona") },
+        text = {
+            Column {
+                // ~40 KB por tesela vectorial en promedio: solo para dar una idea.
+                Text(
+                    if (cabe) {
+                        "Se guarda lo que ves en pantalla para usarlo sin internet. Aprox. ${ZonasOffline.mb(n * 40_000)} ($n teselas)."
+                    } else {
+                        "La zona es muy grande ($n teselas, máximo ${ZonasOffline.MAX_TESELAS}). Acerca el mapa y vuelve a intentar."
+                    },
+                )
+                if (cabe) OutlinedTextField(nombre, { if (it.length <= 30) nombre = it }, label = { Text("Nombre (ej. Sierra Gorda)") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                ZonasOffline.descargar(ctx.applicationContext, nombre.trim(), b) { error ->
+                    Toast.makeText(ctx, error ?: "Zona \"${nombre.trim()}\" lista para usar sin internet", Toast.LENGTH_LONG).show()
+                }
+                cerrar()
+            }, enabled = cabe && nombre.isNotBlank()) { Text("Descargar") }
+        },
+        dismissButton = { TextButton(onClick = cerrar) { Text("Cancelar") } },
+    )
+}
+
+private fun prepararEstilo(
+    s: Style,
+    claro: Boolean,
+): Style {
+    val tinta = if (claro) "#1C1F23" else "#F4EFE6"
+    val fondo = if (claro) "#FFFFFF" else "#1C1F23"
+    // Zonas descargadas debajo de los nodos: relleno tenue, borde punteado y nombre.
+    s.addSource(GeoJsonSource("zonas"))
+    s.addLayer(FillLayer("zonas-relleno", "zonas").withProperties(fillColor("#F26B1D"), fillOpacity(0.06f)))
+    s.addLayer(LineLayer("zonas-borde", "zonas").withProperties(lineColor("#F26B1D"), lineWidth(2f), lineDasharray(arrayOf(2f, 2f))))
+    s.addLayer(
+        SymbolLayer("zonas-nombre", "zonas").withProperties(
+            textField(get("nombre")),
+            textFont(arrayOf("Noto Sans Regular")),
+            textSize(12f),
+            textColor("#F26B1D"),
+            textHaloColor(fondo),
+            textHaloWidth(1.5f),
+        ),
+    )
+    s.addSource(GeoJsonSource("nodos"))
+    s.addLayer(
+        CircleLayer("nodos-punto", "nodos").withProperties(
+            circleRadius(8f),
+            circleColor(toColor(get("color"))),
+            circleStrokeWidth(2f),
+            circleStrokeColor(fondo),
+        ),
+    )
+    s.addLayer(
+        SymbolLayer("nodos-nombre", "nodos").withProperties(
+            textField(get("nombre")),
+            // La única fuente que sirven ambos estilos; con la default (Open Sans) las etiquetas dan 404.
+            textFont(arrayOf("Noto Sans Regular")),
+            textSize(13f),
+            textOffset(arrayOf(0f, 1.4f)),
+            textColor(tinta),
+            textHaloColor(fondo),
+            textHaloWidth(1.5f),
+        ),
+    )
+    return s
 }

@@ -22,6 +22,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -177,6 +178,9 @@ fun Ajustes(
         ) { Text("Crear canal privado") }
 
         Unirse(alInterpretar = { porUnirse = it }, alError = { aviso = it })
+
+        HorizontalDivider()
+        MapasSinInternet()
         Text(
             "Al crear o unirte a un canal privado, tu ubicación deja de enviarse por el canal público y va exacta solo por el privado.",
             style = MaterialTheme.typography.bodySmall,
@@ -312,4 +316,29 @@ private fun qrBitmap(texto: String): Bitmap {
     val m = QRCodeWriter().encode(texto, BarcodeFormat.QR_CODE, 512, 512)
     val px = IntArray(m.width * m.height) { if (m[it % m.width, it / m.width]) 0xFF000000.toInt() else 0xFFFFFFFF.toInt() }
     return Bitmap.createBitmap(px, m.width, m.height, Bitmap.Config.ARGB_8888)
+}
+
+@Composable
+private fun MapasSinInternet() {
+    val ctx = LocalContext.current
+    var zonas by remember { mutableStateOf<List<Zona>?>(null) }
+    val progreso = ZonasOffline.progreso
+    // Se vuelve a listar al terminar una descarga (progreso pasa a null).
+    LaunchedEffect(progreso == null) { ZonasOffline.listar(ctx) { zonas = it } }
+
+    Text("Mapas sin internet", style = MaterialTheme.typography.titleMedium)
+    Text("Para descargar, ve a la zona en Mapa y toca ⤓.", style = MaterialTheme.typography.bodySmall)
+    progreso?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+    zonas?.forEach { z ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text(z.nombre)
+                Text(ZonasOffline.mb(z.bytes) + if (z.completa) "" else " · incompleta", style = MaterialTheme.typography.bodySmall)
+            }
+            TextButton(onClick = { ZonasOffline.borrar(z) { ZonasOffline.listar(ctx) { zonas = it } } }) {
+                Text("Borrar", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+    if (zonas?.isEmpty() == true) Text("Aún no tienes zonas descargadas.", style = MaterialTheme.typography.bodySmall)
 }

@@ -23,7 +23,11 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import androidx.core.util.AtomicFile
+import io.github.ricardomonroy.canalcero.mesh.Alerta
 import io.github.ricardomonroy.canalcero.mesh.Entrega
+import io.github.ricardomonroy.canalcero.mesh.SIN_SENAL_SEG
+import io.github.ricardomonroy.canalcero.mesh.alertas
+import io.github.ricardomonroy.canalcero.mesh.companeros
 import io.github.ricardomonroy.canalcero.mesh.Estado
 import io.github.ricardomonroy.canalcero.mesh.MeshBle
 import io.github.ricardomonroy.canalcero.mesh.MeshState
@@ -34,6 +38,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -61,8 +66,73 @@ class Malla(
     var compartirUbicacion by mutableStateOf(false)
         private set
 
+    /** Claro por defecto: el oscuro casi no se lee al sol. */
+    var estiloClaro by mutableStateOf(prefs.getBoolean("estilo_claro", true))
+        private set
+
+    fun alternarEstilo() {
+        estiloClaro = !estiloClaro
+        prefs.edit { putBoolean("estilo_claro", estiloClaro) }
+    }
+
+    // --- Modo ruta: compañeros del grupo y alertas ---
+
+    /** Nodos marcados como "de mi grupo" en la pestaña Ruta; solo ellos generan alertas. */
+    var grupo by mutableStateOf(prefs.getStringSet("grupo", emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet())
+        private set
+
+    var umbralKm by mutableStateOf(prefs.getInt("umbral_km", 2))
+        private set
+
+    fun alternarGrupo(num: Int) {
+        grupo = if (num in grupo) grupo - num else grupo + num
+        prefs.edit { putStringSet("grupo", grupo.map { it.toString() }.toSet()) }
+    }
+
+    fun cambiarUmbral(km: Int) {
+        umbralKm = km
+        prefs.edit { putInt("umbral_km", km) }
+    }
+
+    private fun vigilarGrupo() =
+        scope.launch {
+            var activas = emptyMap<Int, Alerta>()
+            while (true) {
+                val st = ble.state.value
+                val ahora = alertas(companeros(st, System.currentTimeMillis() / 1000), grupo, umbralKm * 1000.0)
+                // Solo avisa al aparecer o cambiar una alerta, no en cada revisión.
+                ahora.filter { (num, a) -> activas[num] != a }.forEach { (num, a) -> avisarAlerta(st, num, a) }
+                activas = ahora
+                delay(30_000)
+            }
+        }
+
+    private fun avisarAlerta(
+        st: MeshState,
+        num: Int,
+        a: Alerta,
+    ) {
+        if (!tiene(Manifest.permission.POST_NOTIFICATIONS)) return
+        val texto =
+            when (a) {
+                Alerta.LEJOS -> "Está a más de $umbralKm km de ti"
+                Alerta.SIN_SENAL -> "Sin señal desde hace más de ${SIN_SENAL_SEG / 60} min"
+            }
+        val n =
+            NotificationCompat
+                .Builder(app, CANAL_MENSAJES)
+                .setSmallIcon(R.drawable.ic_notificacion)
+                .setContentTitle("Ruta · ${st.nombre(num)}")
+                .setContentText(texto)
+                .setContentIntent(abrirApp(app))
+                .setAutoCancel(true)
+                .build()
+        NotificationManagerCompat.from(app).notify(ID_ALERTA + num, n)
+    }
+
     init {
         crearCanalesDeNotificacion()
+        vigilarGrupo()
         guardarHistorialAlCambiar()
         avisarMensajesNuevos()
         reconectarUltimoNodo()
@@ -184,6 +254,7 @@ class Malla(
     companion object {
         const val CANAL_SERVICIO = "servicio"
         const val CANAL_MENSAJES = "mensajes"
+        private const val ID_ALERTA = 1_000_000
 
         fun abrirApp(ctx: Context): PendingIntent =
             PendingIntent.getActivity(
