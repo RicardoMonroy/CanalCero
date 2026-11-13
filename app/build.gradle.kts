@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.wire)
 }
 
 // La keystore y sus contraseñas viven fuera del repo (es público). Sin este archivo la release sale sin firmar.
@@ -57,11 +58,22 @@ android {
     }
 }
 
+// Protobufs oficiales de Meshtastic (src/main/proto). Solo se generan los tipos alcanzables desde estas raíces.
+wire {
+    sourcePath { srcDir("src/main/proto") }
+    // nanopb.proto solo se importa (atak.proto usa sus opciones); no se genera código para él.
+    protoPath { srcDir("src/main/proto-deps") }
+    kotlin {}
+    root("meshtastic.FromRadio", "meshtastic.ToRadio")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
+    testImplementation(libs.junit)
 }
