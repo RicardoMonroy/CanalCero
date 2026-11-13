@@ -29,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -60,6 +61,16 @@ import io.github.ricardomonroy.canalcero.ui.CanalCeroTheme
 import org.meshtastic.proto.NodeInfo
 
 class MainActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        malla.visible = true
+    }
+
+    override fun onStop() {
+        malla.visible = false
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -80,9 +91,16 @@ private val PERMISOS =
         arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
+// Avisos de mensajes con la app cerrada; opcional: si se niega, la app funciona igual.
+private val PERMISOS_EXTRA = if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray()
+
 @Composable
 private fun App(vm: MeshViewModel = viewModel()) {
     val st by vm.ble.state.collectAsState()
+    val pedirAvisos = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+    LaunchedEffect(Unit) {
+        if (PERMISOS_EXTRA.any { !vm.malla.tiene(it) }) pedirAvisos.launch(PERMISOS_EXTRA)
+    }
     Text("CanalCero", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
     if (st.estado == Estado.DESCONECTADO) Escaneo(vm, st.error) else Conectado(st, vm)
 }
@@ -95,14 +113,14 @@ private fun Escaneo(
     val ctx = LocalContext.current
     val pedir =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
-            if (r.values.all { it }) vm.escanear()
+            if (PERMISOS.all { r[it] == true }) vm.escanear()
         }
     val tienePermisos = { PERMISOS.all { ctx.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED } }
 
     Text("Enciende tu nodo y búscalo.", Modifier.padding(vertical = 8.dp))
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     Button(
-        onClick = { if (tienePermisos()) vm.escanear() else pedir.launch(PERMISOS) },
+        onClick = { if (tienePermisos()) vm.escanear() else pedir.launch(PERMISOS + PERMISOS_EXTRA) },
         enabled = !vm.escaneando,
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
     ) { Text(if (vm.escaneando) "Buscando…" else "Buscar nodos") }
@@ -132,12 +150,13 @@ private fun Conectado(
         when (st.estado) {
             Estado.EMPAREJANDO -> "Escribe el PIN que muestra la pantalla del nodo"
             Estado.CONECTANDO -> "Conectando…"
+            Estado.RECONECTANDO -> "Reconectando… (nodo reiniciándose o fuera de alcance)"
             Estado.DESCARGANDO -> "Descargando nodos… (${st.nodos.size})"
             else -> "Conectado · firmware ${st.firmware ?: "?"}"
         }
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(texto, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = { vm.ble.desconectar() }) { Text("Desconectar") }
+        OutlinedButton(onClick = { vm.malla.desconectar() }) { Text("Desconectar") }
     }
 
     abierto?.let { chat ->
@@ -195,7 +214,7 @@ private fun InterruptorUbicacion(vm: MeshViewModel) {
     val ctx = LocalContext.current
     val pedir =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
-            if (r[Manifest.permission.ACCESS_FINE_LOCATION] == true) vm.alternarUbicacion(true)
+            if (r[Manifest.permission.ACCESS_FINE_LOCATION] == true) vm.malla.alternarUbicacion(true)
         }
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -206,11 +225,11 @@ private fun InterruptorUbicacion(vm: MeshViewModel) {
             )
         }
         Switch(
-            checked = vm.compartirUbicacion,
+            checked = vm.malla.compartirUbicacion,
             onCheckedChange = { on ->
                 val permitido = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
                 if (!on || permitido) {
-                    vm.alternarUbicacion(on)
+                    vm.malla.alternarUbicacion(on)
                 } else {
                     pedir.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                 }

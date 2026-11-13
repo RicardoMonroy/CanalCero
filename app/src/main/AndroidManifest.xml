@@ -16,10 +16,16 @@
     <!-- Ubicación del teléfono para el nodo (el Heltec V3 no tiene GPS); en Android 10 y 11 también para escanear. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Servicio en primer plano: conexión con el nodo y ubicación con la pantalla apagada. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Mosaicos del mapa. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
+        android:name=".CanalCeroApp"
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
@@ -33,5 +39,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".MeshService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|location" />
     </application>
 </manifest>

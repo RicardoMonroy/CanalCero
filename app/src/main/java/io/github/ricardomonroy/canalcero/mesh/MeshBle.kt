@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -51,6 +52,7 @@ import kotlin.random.Random
 class MeshBle(
     private val ctx: Context,
     private val scope: CoroutineScope,
+    inicial: MeshState = MeshState(),
 ) {
     companion object {
         val SERVICIO: UUID = UUID.fromString("6ba1b218-15a8-461f-9fa8-5dcae273eafd")
@@ -62,19 +64,24 @@ class MeshBle(
         private const val TIMEOUT_MS = 10_000L
     }
 
-    private val _state = MutableStateFlow(MeshState())
+    private val _state = MutableStateFlow(inicial)
     val state: StateFlow<MeshState> = _state
 
     private var gatt: BluetoothGatt? = null
     private var sesion: Job? = null
+
+    // Nodo elegido por el usuario. Mientras no sea null, una conexión perdida se reintenta sola.
+    var dispositivo: BluetoothDevice? = null
+        private set
 
     // Android solo admite una operación GATT a la vez: este mutex las serializa.
     private val ops = Mutex()
     private var pendiente: CompletableDeferred<ByteArray>? = null
 
     fun conectar(device: BluetoothDevice) {
-        desconectar()
-        _state.value = MeshState(estado = Estado.CONECTANDO)
+        cerrar()
+        dispositivo = device
+        _state.update { it.reiniciar(Estado.CONECTANDO) }
         sesion =
             scope.launch {
                 try {
@@ -85,7 +92,7 @@ class MeshBle(
                     _state.update { it.copy(estado = Estado.CONECTANDO) }
                     gatt = device.connectGatt(ctx, false, callback, BluetoothDevice.TRANSPORT_LE)
                 } catch (e: Exception) {
-                    falla("No se pudo emparejar: ${e.message}")
+                    falla("No se pudo emparejar: ${e.message}", reintentar = false)
                 }
             }
     }
@@ -258,11 +265,17 @@ class MeshBle(
     }
 
     fun desconectar() {
+        dispositivo = null
+        cerrar()
+        _state.update { it.reiniciar(Estado.DESCONECTADO) }
+    }
+
+    private fun cerrar() {
         sesion?.cancel()
         gatt?.close()
         gatt = null
         pendiente?.cancel()
-        _state.value = MeshState()
+        passkeyHora = 0
     }
 
     /** Pide el PIN que muestra la pantalla del Heltec. Espera hasta que Android confirme el vínculo. */
@@ -295,11 +308,28 @@ class MeshBle(
         }
     }
 
-    private fun falla(msg: String) {
+    /**
+     * Conexión caída. Si el usuario no pidió desconectar, se reintenta con autoConnect: Android reconecta solo
+     * cuando el nodo vuelve a estar en alcance o termina de reiniciarse (p. ej. tras cambiar el rol).
+     */
+    private fun falla(
+        msg: String,
+        reintentar: Boolean = true,
+    ) {
         Log.w(TAG, msg)
-        gatt?.close()
-        gatt = null
-        _state.update { MeshState(error = msg) }
+        cerrar()
+        val d = dispositivo?.takeIf { reintentar }
+        if (d == null) {
+            dispositivo = null
+            _state.update { it.reiniciar(Estado.DESCONECTADO, msg) }
+            return
+        }
+        _state.update { it.reiniciar(Estado.RECONECTANDO, msg) }
+        sesion =
+            scope.launch {
+                delay(2_000)
+                if (dispositivo === d) gatt = d.connectGatt(ctx, true, callback, BluetoothDevice.TRANSPORT_LE)
+            }
     }
 
     private val callback =
@@ -327,7 +357,7 @@ class MeshBle(
                 g: BluetoothGatt,
                 status: Int,
             ) {
-                val s = g.getService(SERVICIO) ?: return falla("El dispositivo no tiene el servicio Meshtastic")
+                val s = g.getService(SERVICIO) ?: return falla("El dispositivo no tiene el servicio Meshtastic", reintentar = false)
                 scope.launch {
                     try {
                         handshake(g, s.getCharacteristic(TO_RADIO), s.getCharacteristic(FROM_RADIO), s.getCharacteristic(FROM_NUM))

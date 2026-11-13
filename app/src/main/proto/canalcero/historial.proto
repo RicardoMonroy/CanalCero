@@ -1,0 +1,22 @@
+// Historial local de CanalCero (no viaja por la red): mensajes y última info conocida de cada nodo.
+syntax = "proto3";
+package canalcero;
+option java_package = "io.github.ricardomonroy.canalcero.proto";
+
+import "meshtastic/mesh.proto";
+
+message MensajeGuardado {
+  int32 id = 1;
+  int32 de = 2;
+  int32 para = 3;
+  int32 canal = 4;
+  string texto = 5;
+  int64 hora = 6;
+  int32 entrega = 7; // ordinal de Entrega
+}
+
+message Historial {
+  int32 mi_nodo = 1;
+  repeated MensajeGuardado mensajes = 2;
+  repeated meshtastic.NodeInfo nodos = 3;
+}

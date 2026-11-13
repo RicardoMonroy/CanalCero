@@ -16,7 +16,7 @@ import org.meshtastic.proto.Position
 import org.meshtastic.proto.Routing
 import org.meshtastic.proto.User
 
-enum class Estado { DESCONECTADO, CONECTANDO, EMPAREJANDO, DESCARGANDO, LISTO }
+enum class Estado { DESCONECTADO, CONECTANDO, EMPAREJANDO, DESCARGANDO, LISTO, RECONECTANDO }
 
 /** Destino "todos" de Meshtastic (0xFFFFFFFF). */
 const val BROADCAST: Int = -1
@@ -62,7 +62,6 @@ data class MeshState(
     val lora: Config.LoRaConfig? = null,
     val cfgPosicion: Config.PositionConfig? = null,
     val cfgDispositivo: Config.DeviceConfig? = null,
-    // shortcut: solo en memoria, se pierde al desconectar. Persistir (Room) en el modo emergencia.
     val mensajes: List<Mensaje> = emptyList(),
     val error: String? = null,
 ) {
@@ -74,6 +73,12 @@ data class MeshState(
             is Chat.Directo -> nombre(chat.nodo)
         }
 }
+
+/** Nuevo estado de conexión conservando lo que no depende de ella: historial, nodos conocidos y nuestro número. */
+fun MeshState.reiniciar(
+    estado: Estado,
+    error: String? = null,
+): MeshState = MeshState(estado = estado, error = error, miNodo = miNodo, nodos = nodos, mensajes = mensajes)
 
 /** Aplica un FromRadio al estado. Pura: sin Android, para poder probarla en JVM. [ahora] en ms. */
 fun MeshState.aplicar(
