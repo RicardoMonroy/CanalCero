@@ -20,7 +20,7 @@ class RutaTest {
         num = num,
         user = User(long_name = "N$num"),
         last_heard = (ahora - haceSeg).toInt(),
-        position = latKm?.let { Position(latitude_i = ((20.0 + it * 0.009) * 1e7).toInt(), longitude_i = -1_000_000_000, precision_bits = 32) },
+        position = latKm?.let { Position(latitude_i = ((20.0 + it * 0.009) * 1e7).toInt(), longitude_i = -1_000_000_000, precision_bits = 32, time = (ahora - 60).toInt()) },
     )
 
     private val st =
@@ -76,16 +76,32 @@ class RutaTest {
     @Test
     fun muestraDeAlcanceYCsv() {
         val p = org.meshtastic.proto.MeshPacket(from = 2, rx_rssi = -97, rx_snr = -6.25f, hop_start = 3, hop_limit = 3)
-        val m = muestra(st, p, 42)
+        val ms = ahora * 1000
+        val m = muestra(st, p, ms)
         assertEquals(0, m.saltos)
         assertEquals(3000.0, m.distancia!!, 50.0)
         assertEquals(-97, m.rssi)
-        val relevo = muestra(st, p.copy(hop_limit = 1), 43)
+        val relevo = muestra(st, p.copy(hop_limit = 1), ms)
         assertEquals(2, relevo.saltos)
-        assertEquals(null, muestra(st, p.copy(hop_start = 0), 44).saltos) // firmware viejo
+        assertEquals(null, muestra(st, p.copy(hop_start = 0), ms).saltos) // firmware viejo
+        assertTrue(m.fiable)
+        assertEquals(false, muestra(st, p, ms + 20 * 60_000).fiable) // posiciones de hace 20 min ya no cuentan
         assertEquals(3000.0, alcanceDirecto(listOf(m, relevo))!!, 50.0) // el de 2 saltos no cuenta
         val csv = csvAlcance(listOf(m.copy(nombre = "Moto, \"R1\"")))
         assertTrue(csv.lines()[1].contains("\"Moto, \"\"R1\"\"\""))
         assertEquals(8, csv.lines()[0].split(',').size)
+    }
+
+    @Test
+    fun recordSoloSubeConPaquetesDirectosFiables() {
+        fun mu(d: Double, saltos: Int?, fiable: Boolean = true) = Muestra(0, 2, "N2", -90, 1f, saltos, d, false, fiable)
+        var r = emptyMap<String, Record>()
+        r = conRecord(r, yo, mu(800.0, 0))
+        r = conRecord(r, yo, mu(500.0, 0)) // menor: no baja
+        r = conRecord(r, yo, mu(5_000.0, 2)) // por repetidor: no cuenta
+        r = conRecord(r, yo, mu(9_000.0, 0, fiable = false)) // posición aproximada o vieja
+        r = conRecord(r, null, mu(9_000.0, 0)) // sin nodo propio
+        assertEquals(mapOf(claveRecord(yo, 2) to Record(800.0, 0)), r)
+        assertEquals("!00000001:!00000002", claveRecord(1, 2))
     }
 }

@@ -23,6 +23,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
@@ -82,6 +85,7 @@ enum class SubAjuste(
     CANALES("Canales"),
     MAPAS("Mapas sin internet"),
     APARIENCIA("Apariencia"),
+    ACERCA("Acerca de"),
 }
 
 @Composable
@@ -122,6 +126,7 @@ fun Ajustes(
             SubAjuste.CANALES -> Canales(st, ble, ocupado, ejecutar) { aviso = it }
             SubAjuste.MAPAS -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { MapasSinInternet() }
             SubAjuste.APARIENCIA -> Apariencia(malla)
+            SubAjuste.ACERCA -> Acerca()
         }
     }
 }
@@ -150,6 +155,7 @@ private fun Inicio(
     Seccion("App")
     Fila(R.drawable.ic_download, "Mapas sin internet", "Zonas descargadas para usar sin red") { ir(SubAjuste.MAPAS) }
     Fila(R.drawable.ic_palette, "Apariencia", malla.tema.nombre) { ir(SubAjuste.APARIENCIA) }
+    Fila(R.drawable.ic_info, "Acerca de", "Versión ${version(LocalContext.current)}, licencia y créditos") { ir(SubAjuste.ACERCA) }
     Spacer(Modifier.height(16.dp))
     Fila(R.drawable.ic_link_off, "Desconectar nodo", "Deja de usar este nodo en el teléfono", alerta = true) {
         ir(null)
@@ -544,4 +550,33 @@ private fun MapasSinInternet() {
         }
     }
     if (zonas?.isEmpty() == true) Text("Aún no tienes zonas descargadas.", style = MaterialTheme.typography.bodySmall)
+}
+
+private const val REPO = "https://github.com/RicardoMonroy/CanalCero"
+
+fun version(ctx: android.content.Context): String = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
+
+@Composable
+private fun Acerca() {
+    val ctx = LocalContext.current
+    val abrir = { url: String -> ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+    Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Image(painterResource(R.drawable.ic_launcher), null, Modifier.size(80.dp).clip(RoundedCornerShape(22.dp)))
+        Text("CanalCero", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+        Text("Versión ${version(ctx)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Mensajes y ubicación por LoRa cuando no hay señal.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    Seccion("Proyecto")
+    Fila(R.drawable.ic_share, "Código fuente y descargas", REPO.removePrefix("https://")) { abrir(REPO) }
+    Fila(R.drawable.ic_error, "Reportar un problema", "Incluye la versión de la app y el modelo de tu nodo") { abrir("$REPO/issues") }
+    Fila(R.drawable.ic_lock, "Licencia", "GPL-3.0: libre de usar, estudiar y modificar") { abrir("$REPO/blob/main/LICENSE") }
+    Seccion("Créditos")
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf(
+            "Meshtastic: protocolo y protobufs (GPL-3.0). CanalCero es independiente y compatible.",
+            "MapLibre Native (BSD-2) y teselas de OpenFreeMap con datos © colaboradores de OpenStreetMap (ODbL).",
+            "Íconos Material Symbols de Google (Apache 2.0).",
+            "ZXing para generar códigos QR (Apache 2.0).",
+        ).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
 }

@@ -31,6 +31,7 @@ import io.github.ricardomonroy.canalcero.Malla
 import io.github.ricardomonroy.canalcero.R
 import io.github.ricardomonroy.canalcero.mesh.CERCA_SEG
 import io.github.ricardomonroy.canalcero.mesh.Chat
+import io.github.ricardomonroy.canalcero.mesh.claveRecord
 import io.github.ricardomonroy.canalcero.mesh.MeshState
 import io.github.ricardomonroy.canalcero.mesh.distancia
 import io.github.ricardomonroy.canalcero.mesh.esAproximada
@@ -176,6 +177,7 @@ private fun FichaNodo(
             if (n.last_heard > 0) Dato("Última vez", hace(ahora - n.last_heard))
             n.hops_away?.let { Dato("Ruta", if (it == 0) "Directo, sin repetidores" else "$it saltos") }
             if (!mio && n.snr != 0f) Dato("Señal", "%.1f dB".format(n.snr))
+            st.miNodo?.let { malla.records[claveRecord(it, num)] }?.let { Dato("Alcance directo máx.", "${textoDistancia(it.metros)} · ${horaCorta(it.hora)}") }
             n.user?.hw_model?.let { Dato("Equipo", it.name.replace('_', ' ')) }
             if (!mio) {
                 Traceroute(st, malla, num)

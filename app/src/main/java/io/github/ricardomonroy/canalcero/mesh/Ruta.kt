@@ -121,16 +121,25 @@ data class Muestra(
     val saltos: Int?,
     val distancia: Double?,
     val aproximada: Boolean,
+    /** Distancia confiable: ambas posiciones exactas y de los últimos [POSICION_RECIENTE_SEG]. */
+    val fiable: Boolean = false,
 )
+
+/** Una posición más vieja que esto ya no sirve para medir alcance (el nodo pudo moverse). */
+const val POSICION_RECIENTE_SEG = 15 * 60L
+
+private fun org.meshtastic.proto.Position?.reciente(ahoraSeg: Long): Boolean = this != null && time > 0 && ahoraSeg - time <= POSICION_RECIENTE_SEG
 
 fun muestra(
     st: MeshState,
     p: org.meshtastic.proto.MeshPacket,
     ahora: Long,
 ): Muestra {
-    val yo = st.miNodo?.let { st.nodos[it]?.position.grados() }
+    val miPos = st.miNodo?.let { st.nodos[it]?.position }
+    val yo = miPos.grados()
     val otro = st.nodos[p.from]?.position
     val donde = otro.grados()
+    val seg = ahora / 1000
     return Muestra(
         hora = ahora,
         nodo = p.from,
@@ -141,11 +150,37 @@ fun muestra(
         saltos = if (p.hop_start > 0) p.hop_start - p.hop_limit else null,
         distancia = if (yo != null && donde != null) distancia(yo, donde) else null,
         aproximada = otro?.esAproximada() ?: false,
+        fiable = yo != null && donde != null && otro?.esAproximada() == false && miPos.reciente(seg) && otro.reciente(seg),
     )
 }
 
 /** Mayor distancia confiable (posición exacta) a la que llegó un paquete sin repetidor. */
-fun alcanceDirecto(ms: List<Muestra>): Double? = ms.filter { it.saltos == 0 && !it.aproximada }.mapNotNull { it.distancia }.maxOrNull()
+fun alcanceDirecto(ms: List<Muestra>): Double? = ms.filter { it.saltos == 0 && it.fiable }.mapNotNull { it.distancia }.maxOrNull()
+
+/** Récord de alcance directo entre nuestro nodo y otro: la mayor distancia lineal a la que llegó un paquete sin repetidor. */
+data class Record(
+    val metros: Double,
+    val hora: Long,
+)
+
+/** Clave por par de nodos: el récord depende de los dos equipos (y sus antenas). */
+fun claveRecord(
+    mio: Int,
+    otro: Int,
+): String = "${idNodo(mio)}:${idNodo(otro)}"
+
+/** Actualiza los récords con una muestra; solo cuentan paquetes directos con distancia fiable. */
+fun conRecord(
+    records: Map<String, Record>,
+    mio: Int?,
+    m: Muestra,
+): Map<String, Record> {
+    if (mio == null || m.saltos != 0 || !m.fiable) return records
+    val d = m.distancia ?: return records
+    val k = claveRecord(mio, m.nodo)
+    val previo = records[k]
+    return if (previo == null || d > previo.metros) records + (k to Record(d, m.hora)) else records
+}
 
 fun csvAlcance(ms: List<Muestra>): String =
     buildString {

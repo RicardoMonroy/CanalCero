@@ -27,6 +27,8 @@ import androidx.core.util.AtomicFile
 import io.github.ricardomonroy.canalcero.mesh.Alerta
 import io.github.ricardomonroy.canalcero.mesh.Chat
 import io.github.ricardomonroy.canalcero.mesh.Muestra
+import io.github.ricardomonroy.canalcero.mesh.Record
+import io.github.ricardomonroy.canalcero.mesh.conRecord
 import io.github.ricardomonroy.canalcero.mesh.TipoEmergencia
 import io.github.ricardomonroy.canalcero.mesh.tipoEmergencia
 import io.github.ricardomonroy.canalcero.mesh.urgente
@@ -291,9 +293,31 @@ class Malla(
         alcanceActivo = activar
     }
 
+    /** Récords de alcance directo por par de nodos; se miden siempre, no solo durante la prueba. */
+    var records by mutableStateOf(
+        prefs.getStringSet("alcance", emptySet())!!.mapNotNull { e ->
+            e.split('=').takeIf { it.size == 3 }?.let { (k, m, h) -> m.toDoubleOrNull()?.let { k to Record(it, h.toLongOrNull() ?: 0) } }
+        }.toMap(),
+    )
+        private set
+
+    fun borrarRecords() {
+        records = emptyMap()
+        prefs.edit { remove("alcance") }
+    }
+
     private fun registrarAlcance() =
         scope.launch {
-            ble.paquetes.collect { p -> if (alcanceActivo) muestras += muestra(ble.state.value, p, System.currentTimeMillis()) }
+            ble.paquetes.collect { p ->
+                val st = ble.state.value
+                val m = muestra(st, p, System.currentTimeMillis())
+                if (alcanceActivo) muestras += m
+                val nuevos = conRecord(records, st.miNodo, m)
+                if (nuevos != records) {
+                    records = nuevos
+                    prefs.edit { putStringSet("alcance", nuevos.map { (k, r) -> "$k=${r.metros}=${r.hora}" }.toSet()) }
+                }
+            }
         }
 
     private fun latidoEnVivo() =

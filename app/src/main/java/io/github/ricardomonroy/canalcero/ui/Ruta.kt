@@ -17,6 +17,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,6 +39,7 @@ import io.github.ricardomonroy.canalcero.mesh.MeshState
 import io.github.ricardomonroy.canalcero.mesh.alcanceDirecto
 import io.github.ricardomonroy.canalcero.mesh.alertas
 import io.github.ricardomonroy.canalcero.mesh.csvAlcance
+import io.github.ricardomonroy.canalcero.mesh.idNodo
 import io.github.ricardomonroy.canalcero.mesh.companeros
 import io.github.ricardomonroy.canalcero.mesh.puntoCardinal
 import io.github.ricardomonroy.canalcero.mesh.textoDistancia
@@ -63,7 +65,7 @@ fun Ruta(
         if (!malla.usaUbicacion) {
             Text("Activa \"Compartir ubicación\" en Mapa para ver distancias.", color = MaterialTheme.colorScheme.error)
         }
-        PruebaAlcance(malla)
+        PruebaAlcance(st, malla)
         Text("Marca a tu grupo: te aviso si alguien se aleja o pierde señal.", style = MaterialTheme.typography.bodySmall)
         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Avisar a más de", style = MaterialTheme.typography.bodySmall)
@@ -115,7 +117,10 @@ fun Ruta(
 
 /** Registra señal, saltos y distancia de cada paquete recibido mientras te alejas; se exporta como CSV. */
 @Composable
-private fun PruebaAlcance(malla: Malla) {
+private fun PruebaAlcance(
+    st: MeshState,
+    malla: Malla,
+) {
     val ctx = LocalContext.current
     val ms = malla.muestras
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
@@ -143,6 +148,7 @@ private fun PruebaAlcance(malla: Malla) {
                     )
                 }
             }
+            Records(st, malla)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { malla.alternarAlcance(!malla.alcanceActivo) }) { Text(if (malla.alcanceActivo) "Detener" else "Iniciar") }
                 if (ms.isNotEmpty()) {
@@ -154,4 +160,36 @@ private fun PruebaAlcance(malla: Malla) {
             }
         }
     }
+}
+
+/** Distancia lineal máxima a la que cada nodo nos llegó directo, con el modelo de equipo para comparar. */
+@Composable
+private fun Records(
+    st: MeshState,
+    malla: Malla,
+) {
+    val yo = st.miNodo ?: return
+    val prefijo = idNodo(yo) + ":"
+    val mios = malla.records.filterKeys { it.startsWith(prefijo) }.toList().sortedByDescending { it.second.metros }
+    Text("Récords de alcance directo", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
+    if (mios.isEmpty()) {
+        Text(
+            "Se miden solos cuando un nodo te llega sin repetidor y ambos comparten ubicación exacta (canal privado o en vivo).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    mios.forEach { (k, r) ->
+        val num = st.nodos.keys.firstOrNull { idNodo(it) == k.removePrefix(prefijo) }
+        val equipo = num?.let { st.nodos[it]?.user?.hw_model?.name?.replace('_', ' ') }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(num?.let { st.nombre(it) } ?: k.removePrefix(prefijo), style = MaterialTheme.typography.bodyMedium)
+                Text(listOfNotNull(equipo, horaCorta(r.hora)).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(textoDistancia(r.metros), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+    TextButton(onClick = { malla.borrarRecords() }) { Text("Borrar récords") }
 }
