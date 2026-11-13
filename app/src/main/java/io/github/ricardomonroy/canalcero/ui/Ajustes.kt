@@ -38,6 +38,7 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import io.github.ricardomonroy.canalcero.mesh.Chat
 import io.github.ricardomonroy.canalcero.mesh.MAX_BYTES_NOMBRE_CANAL
 import io.github.ricardomonroy.canalcero.mesh.MAX_BYTES_NOMBRE_CORTO
 import io.github.ricardomonroy.canalcero.mesh.MAX_BYTES_NOMBRE_LARGO
@@ -67,6 +68,8 @@ fun Ajustes(
     var qr by remember { mutableStateOf<String?>(null) }
     var porUnirse by remember { mutableStateOf<ChannelSettings?>(null) }
     var rolPendiente by remember { mutableStateOf<Rol?>(null) }
+    var saliendo by remember { mutableStateOf<Chat?>(null) }
+    saliendo?.let { OpcionesChat(st, it, ble) { saliendo = null } }
 
     // Las operaciones de admin pueden reiniciar el nodo: el error se muestra, no se oculta.
     fun ejecutar(
@@ -151,7 +154,10 @@ fun Ajustes(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (c.index > 0 && s != null) TextButton(onClick = { qr = urlCanal(s, st.lora) }) { Text("Compartir") }
+                if (c.index > 0 && s != null) {
+                    TextButton(onClick = { qr = urlCanal(s, st.lora) }) { Text("Compartir") }
+                    TextButton(onClick = { saliendo = Chat.Canal(c.index) }) { Text("Salir", color = MaterialTheme.colorScheme.error) }
+                }
             }
         }
 

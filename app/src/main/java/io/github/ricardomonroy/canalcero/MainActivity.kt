@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -57,6 +59,7 @@ import io.github.ricardomonroy.canalcero.mesh.rumbo
 import io.github.ricardomonroy.canalcero.mesh.textoDistancia
 import io.github.ricardomonroy.canalcero.ui.Ajustes
 import io.github.ricardomonroy.canalcero.ui.Mapa
+import io.github.ricardomonroy.canalcero.ui.OpcionesChat
 import io.github.ricardomonroy.canalcero.ui.CanalCeroTheme
 import org.meshtastic.proto.NodeInfo
 
@@ -146,6 +149,8 @@ private fun Conectado(
 ) {
     var abierto by rememberSaveable(stateSaver = ChatSaver) { mutableStateOf<Chat?>(null) }
     var pestana by rememberSaveable { mutableIntStateOf(0) }
+    var opciones by remember { mutableStateOf<Chat?>(null) }
+    opciones?.let { OpcionesChat(st, it, vm.ble) { opciones = null } }
     val texto =
         when (st.estado) {
             Estado.EMPAREJANDO -> "Escribe el PIN que muestra la pantalla del nodo"
@@ -164,6 +169,7 @@ private fun Conectado(
         PantallaChat(
             st,
             chat,
+            ble = vm.ble,
             enviar = { vm.ble.enviarTexto(it, chat) },
             volver = { abierto = null },
             enviarUbicacion = { (chat as? Chat.Directo)?.let { vm.ble.enviarPosicionA(it.nodo) } },
@@ -193,7 +199,7 @@ private fun Conectado(
             val chats = (st.canales.keys.sorted().map { Chat.Canal(it) } + st.mensajes.map { it.chat(st.miNodo) }).distinct()
             items(chats, key = { it.toString() }) { c ->
                 val ultimo = st.mensajes.lastOrNull { it.chat(st.miNodo) == c }
-                Column(Modifier.fillMaxWidth().clickable { abierto = c }.padding(vertical = 16.dp)) {
+                Column(Modifier.fillMaxWidth().combinedClickable(onLongClick = { opciones = c }) { abierto = c }.padding(vertical = 16.dp)) {
                     Text((if (c is Chat.Canal) "# " else "") + st.nombre(c), style = MaterialTheme.typography.titleMedium)
                     ultimo?.let { Text("${st.nombre(it.de)}: ${it.texto}", style = MaterialTheme.typography.bodySmall, maxLines = 1) }
                 }

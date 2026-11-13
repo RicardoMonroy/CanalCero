@@ -80,6 +80,12 @@ fun MeshState.reiniciar(
     error: String? = null,
 ): MeshState = MeshState(estado = estado, error = error, miNodo = miNodo, nodos = nodos, mensajes = mensajes)
 
+/** Borra una conversación solo en este teléfono (Meshtastic no tiene borrado remoto). */
+fun MeshState.sinChat(chat: Chat): MeshState = copy(mensajes = mensajes.filterNot { it.chat(miNodo) == chat })
+
+/** Borra un mensaje solo en este teléfono. El par (de, id) lo identifica: los ids son por remitente. */
+fun MeshState.sinMensaje(m: Mensaje): MeshState = copy(mensajes = mensajes.filterNot { it.de == m.de && it.id == m.id })
+
 /** Aplica un FromRadio al estado. Pura: sin Android, para poder probarla en JVM. [ahora] en ms. */
 fun MeshState.aplicar(
     fr: FromRadio,

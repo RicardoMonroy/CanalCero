@@ -111,4 +111,16 @@ class MeshStateTest {
         assertEquals(60, st.cfgPosicion?.position_broadcast_secs) // otra sección no la borra
         assertEquals(3, st.lora?.hop_limit)
     }
+
+    @Test
+    fun borrarEsLocalYPrecisa() {
+        val canal = Mensaje(1, otro, BROADCAST, 1, "en canal", 0, Entrega.RECIBIDO)
+        val directo = Mensaje(1, otro, yo, 0, "directo mismo id", 0, Entrega.RECIBIDO) // mismo id, otro chat
+        val mio = Mensaje(1, yo, otro, 0, "mío mismo id", 0, Entrega.ENTREGADO) // mismo id, otro remitente
+        val st = MeshState(miNodo = yo, mensajes = listOf(canal, directo, mio))
+
+        assertEquals(listOf(canal), st.sinChat(Chat.Directo(otro)).mensajes) // el chat directo incluye los míos
+        assertEquals(listOf(directo, mio), st.sinChat(Chat.Canal(1)).mensajes)
+        assertEquals(listOf(canal, directo), st.sinMensaje(mio).mensajes) // (de, id) distingue
+    }
 }

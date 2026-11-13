@@ -264,6 +264,21 @@ class MeshBle(
         }
     }
 
+    fun borrarChat(chat: Chat) = _state.update { it.sinChat(chat) }
+
+    fun borrarMensaje(m: Mensaje) = _state.update { it.sinMensaje(m) }
+
+    /**
+     * Quita un canal secundario de nuestro nodo y borra su conversación (si no, sus mensajes aparecerían en el
+     * siguiente canal que ocupe ese índice). Los demás miembros conservan el canal: no hay borrado remoto.
+     */
+    suspend fun salirDeCanal(indice: Int) {
+        require(indice > 0) { "El canal primario no se puede quitar" }
+        val vacio = Channel(index = indice, role = Channel.Role.DISABLED)
+        administrar(listOf(AdminMessage(set_channel = vacio)))
+        _state.update { it.conCanal(vacio).sinChat(Chat.Canal(indice)) }
+    }
+
     fun desconectar() {
         dispositivo = null
         cerrar()

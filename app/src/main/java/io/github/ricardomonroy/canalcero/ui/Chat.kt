@@ -1,6 +1,7 @@
 package io.github.ricardomonroy.canalcero.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +21,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -29,7 +31,9 @@ import androidx.compose.ui.unit.dp
 import io.github.ricardomonroy.canalcero.mesh.Chat
 import io.github.ricardomonroy.canalcero.mesh.Entrega
 import io.github.ricardomonroy.canalcero.mesh.MAX_BYTES_TEXTO
+import io.github.ricardomonroy.canalcero.mesh.MeshBle
 import io.github.ricardomonroy.canalcero.mesh.MeshState
+import io.github.ricardomonroy.canalcero.mesh.Mensaje
 import java.text.DateFormat
 import java.util.Date
 
@@ -37,12 +41,15 @@ import java.util.Date
 fun PantallaChat(
     st: MeshState,
     chat: Chat,
+    ble: MeshBle,
     enviar: (String) -> Unit,
     volver: () -> Unit,
     enviarUbicacion: () -> Unit,
 ) {
     val mensajes = st.mensajes.filter { it.chat(st.miNodo) == chat }
     val lista = rememberLazyListState()
+    var aBorrar by remember { mutableStateOf<Mensaje?>(null) }
+    aBorrar?.let { BorrarMensaje(it, ble) { aBorrar = null } }
     LaunchedEffect(mensajes.size) { if (mensajes.isNotEmpty()) lista.animateScrollToItem(mensajes.size - 1) }
 
     Column(Modifier.imePadding()) {
@@ -60,6 +67,7 @@ fun PantallaChat(
                     Column(
                         Modifier
                             .widthIn(max = 300.dp)
+                            .combinedClickable(onLongClick = { aBorrar = m }) {}
                             .background(
                                 if (mio) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                                 RoundedCornerShape(12.dp),
