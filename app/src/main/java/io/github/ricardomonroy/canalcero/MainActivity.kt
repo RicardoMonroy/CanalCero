@@ -9,7 +9,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,12 +30,21 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.ricardomonroy.canalcero.mesh.Chat
 import io.github.ricardomonroy.canalcero.mesh.Estado
+import io.github.ricardomonroy.canalcero.ui.PantallaChat
 import io.github.ricardomonroy.canalcero.mesh.MeshState
 import io.github.ricardomonroy.canalcero.mesh.idNodo
 import io.github.ricardomonroy.canalcero.ui.CanalCeroTheme
@@ -64,7 +75,7 @@ private val PERMISOS =
 private fun App(vm: MeshViewModel = viewModel()) {
     val st by vm.ble.state.collectAsState()
     Text("CanalCero", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
-    if (st.estado == Estado.DESCONECTADO) Escaneo(vm, st.error) else Conectado(st) { vm.ble.desconectar() }
+    if (st.estado == Estado.DESCONECTADO) Escaneo(vm, st.error) else Conectado(st, vm)
 }
 
 @Composable
@@ -104,8 +115,10 @@ private fun Escaneo(
 @Composable
 private fun Conectado(
     st: MeshState,
-    desconectar: () -> Unit,
+    vm: MeshViewModel,
 ) {
+    var abierto by rememberSaveable(stateSaver = ChatSaver) { mutableStateOf<Chat?>(null) }
+    var pestana by rememberSaveable { mutableIntStateOf(0) }
     val texto =
         when (st.estado) {
             Estado.EMPAREJANDO -> "Escribe el PIN que muestra la pantalla del nodo"
@@ -114,17 +127,54 @@ private fun Conectado(
             else -> "Conectado · firmware ${st.firmware ?: "?"}"
         }
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(texto, Modifier.weight(1f))
-        OutlinedButton(onClick = desconectar) { Text("Desconectar") }
+        Text(texto, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { vm.ble.desconectar() }) { Text("Desconectar") }
+    }
+
+    abierto?.let { chat ->
+        BackHandler { abierto = null }
+        PantallaChat(st, chat, enviar = { vm.ble.enviarTexto(it, chat) }, volver = { abierto = null })
+        return
+    }
+
+    TabRow(selectedTabIndex = pestana) {
+        Tab(pestana == 0, { pestana = 0 }, text = { Text("Chats") })
+        Tab(pestana == 1, { pestana = 1 }, text = { Text("Nodos (${st.nodos.size})") })
     }
     val ahora = System.currentTimeMillis() / 1000
     LazyColumn {
-        items(st.nodos.values.sortedByDescending { it.last_heard }, key = { it.num }) { n ->
-            FilaNodo(n, esMio = n.num == st.miNodo, ahora = ahora)
-            HorizontalDivider()
+        if (pestana == 0) {
+            val chats = (st.canales.keys.sorted().map { Chat.Canal(it) } + st.mensajes.map { it.chat(st.miNodo) }).distinct()
+            items(chats, key = { it.toString() }) { c ->
+                val ultimo = st.mensajes.lastOrNull { it.chat(st.miNodo) == c }
+                Column(Modifier.fillMaxWidth().clickable { abierto = c }.padding(vertical = 16.dp)) {
+                    Text((if (c is Chat.Canal) "# " else "") + st.nombre(c), style = MaterialTheme.typography.titleMedium)
+                    ultimo?.let { Text("${st.nombre(it.de)}: ${it.texto}", style = MaterialTheme.typography.bodySmall, maxLines = 1) }
+                }
+                HorizontalDivider()
+            }
+        } else {
+            items(st.nodos.values.sortedByDescending { it.last_heard }, key = { it.num }) { n ->
+                val esMio = n.num == st.miNodo
+                Box(Modifier.clickable(enabled = !esMio) { abierto = Chat.Directo(n.num) }) { FilaNodo(n, esMio, ahora) }
+                HorizontalDivider()
+            }
         }
     }
 }
+
+// Chat no es Parcelable: se guarda como [tipo, valor] para sobrevivir a rotaciones.
+private val ChatSaver =
+    listSaver<Chat?, Int>(
+        save = { c ->
+            when (c) {
+                is Chat.Canal -> listOf(0, c.indice)
+                is Chat.Directo -> listOf(1, c.nodo)
+                null -> emptyList()
+            }
+        },
+        restore = { l -> if (l.isEmpty()) null else if (l[0] == 0) Chat.Canal(l[1]) else Chat.Directo(l[1]) },
+    )
 
 @Composable
 private fun FilaNodo(

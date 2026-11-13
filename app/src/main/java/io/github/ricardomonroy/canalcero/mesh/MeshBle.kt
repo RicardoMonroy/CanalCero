@@ -25,7 +25,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import okio.ByteString.Companion.encodeUtf8
+import org.meshtastic.proto.Data
 import org.meshtastic.proto.FromRadio
+import org.meshtastic.proto.MeshPacket
+import org.meshtastic.proto.PortNum
 import org.meshtastic.proto.ToRadio
 import java.util.UUID
 import kotlin.random.Random
@@ -76,6 +80,36 @@ class MeshBle(
                     falla("No se pudo emparejar: ${e.message}")
                 }
             }
+    }
+
+    /** Envía texto con want_ack; el estado pasa a ENTREGADO o FALLO cuando el nodo responde por ROUTING_APP. */
+    fun enviarTexto(
+        texto: String,
+        chat: Chat,
+    ) {
+        val g = gatt ?: return
+        val id = Random.nextInt(1, Int.MAX_VALUE)
+        // En directos el firmware cifra con la llave pública del destino si la conoce (PKC, firmware 2.5+).
+        val (para, canal) =
+            when (chat) {
+                is Chat.Canal -> BROADCAST to chat.indice
+                is Chat.Directo -> chat.nodo to 0
+            }
+        val m = Mensaje(id, _state.value.miNodo ?: 0, para, canal, texto, System.currentTimeMillis(), Entrega.ENVIANDO)
+        _state.update { it.copy(mensajes = it.mensajes + m) }
+        val paquete =
+            MeshPacket(
+                to = para,
+                channel = canal,
+                id = id,
+                want_ack = true,
+                decoded = Data(portnum = PortNum.TEXT_MESSAGE_APP, payload = texto.encodeUtf8()),
+            )
+        scope.launch {
+            runCatching { enviar(g, ToRadio(packet = paquete)) }.onFailure {
+                _state.update { st -> st.copy(mensajes = st.mensajes.map { x -> if (x.id == id) x.copy(entrega = Entrega.FALLO) else x }) }
+            }
+        }
     }
 
     fun desconectar() {
@@ -278,7 +312,7 @@ class MeshBle(
                 val bytes = op { g.readCharacteristic(c) }
                 if (bytes.isEmpty()) break
                 val fr = FromRadio.ADAPTER.decode(bytes)
-                _state.update { it.aplicar(fr) }
+                _state.update { it.aplicar(fr, System.currentTimeMillis()) }
             }
         }
 }
